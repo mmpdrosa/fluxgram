@@ -1,0 +1,81 @@
+---
+title: API Reference
+description: Compact reference for Fluxgram exports, options, adapters, events, observability, and testing.
+---
+
+## Main Export
+
+| Export           | Purpose                                                  |
+| ---------------- | -------------------------------------------------------- |
+| `Fluxgram`       | grammY-facing runtime for registering and running flows. |
+| `FluxgramClient` | External-process client for event bus actions.           |
+| `MemoryStorage`  | In-memory storage for tests and local development.       |
+
+## Step Factories
+
+| Export                            | Purpose                                                      |
+| --------------------------------- | ------------------------------------------------------------ |
+| `send`                            | Send text and media.                                         |
+| `prompt`                          | Prompt for text, messages, buttons, or multi-select choices. |
+| `btn`, `btnRow`                   | Build inline button layouts.                                 |
+| `set`                             | Store a value in flow state.                                 |
+| `branch`                          | Choose a child step from a condition.                        |
+| `callFlow`, `ret`                 | Run reusable subflows and return values.                     |
+| `storeCC`, `callCC`, `redirectCC` | Save and jump to continuations.                              |
+| `sleep`, `humanSleep`, `waitFor`  | Delay or poll with timer support.                            |
+| `forward`, `pin`, `unpin`         | Work with Telegram messages.                                 |
+
+## FluxgramOptions
+
+| Option               | Purpose                                                                    |
+| -------------------- | -------------------------------------------------------------------------- |
+| `storage`            | Required `StorageAdapter` for flow state, waiters, and key-value metadata. |
+| `events`             | Optional cross-process event bus.                                          |
+| `sinks`              | Observability sinks that receive flow events.                              |
+| `versionMismatch`    | Policy for persisted flows whose registered version changed.               |
+| `throttle`           | Built-in outbound rate limiting: `true`, custom options, or `false`.       |
+| `timerThresholdSecs` | Minimum sleep duration that becomes a durable timer.                       |
+| `sweepIntervalMs`    | Interval for periodic recovery sweeps started by `start()`.                |
+
+## Runtime Methods
+
+| Method                                   | Purpose                                                 |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `flow`                                   | Register a named flow tree.                             |
+| `command`, `commands`, `cancelCommand`   | Route bot commands to flows or cancellation.            |
+| `onMessage`                              | Route unmatched messages by regex or filter.            |
+| `use`                                    | Add middleware before flow starts.                      |
+| `init`, `start`, `stop`, `sweep`         | Manage runtime lifecycle and recovery.                  |
+| `initiateFlow`                           | Start a flow programmatically.                          |
+| `listActive`, `getFlowHandle`, `gcFlows` | Inspect and clean up active flow state.                 |
+| `broadcast`                              | Send a message to many chats through the throttled API. |
+
+## Storage Imports
+
+| Adapter  | Import                                                        |
+| -------- | ------------------------------------------------------------- |
+| SQLite   | `import { SqliteStorage } from "fluxgram/storage/sqlite"`     |
+| Postgres | `import { PostgresStorage } from "fluxgram/storage/postgres"` |
+| MongoDB  | `import { MongoStorage } from "fluxgram/storage/mongo"`       |
+| Redis    | `import { RedisStorage } from "fluxgram/storage/redis"`       |
+
+## Event Bus Imports
+
+| Bus     | Import                                                  |
+| ------- | ------------------------------------------------------- |
+| MongoDB | `import { MongoEventBus } from "fluxgram/events/mongo"` |
+| Redis   | `import { RedisEventBus } from "fluxgram/events/redis"` |
+
+## Observability
+
+| Export          | Purpose                                      |
+| --------------- | -------------------------------------------- |
+| `evlogSink`     | Emit each flow event as an evlog wide event. |
+| `jsonSink`      | Write each flow event as one JSON line.      |
+| `DebugChatSink` | Send Telegram debug chat digests.            |
+
+## Testing
+
+| Export        | Import                                           |
+| ------------- | ------------------------------------------------ |
+| `TestHarness` | `import { TestHarness } from "fluxgram/testing"` |

@@ -1,0 +1,52 @@
+---
+title: Messaging
+description: Send text, media, forwards, pins, and long messages safely.
+---
+
+The `send` factory creates text and media send steps.
+
+## Text And Media
+
+```ts
+import { InputFile } from "grammy";
+
+send("Hello.");
+send.photo(new InputFile("./public/photo.jpg"), "Caption");
+send.video(new InputFile("./public/video.mp4"), "Caption");
+send.document(new InputFile("./public/report.pdf", "report.pdf"), "Report attached.");
+```
+
+Fluxgram splits long text into Telegram-sized chunks. For media captions, the first chunk is sent as the caption and remaining chunks become normal messages.
+
+## Send Options
+
+```ts
+send("<b>Important</b>", {
+  parseMode: "HTML",
+  disableWebPagePreview: true,
+  replyToMessageId: 123,
+  onSent: (ctx, message) => {
+    ctx.store.lastBotMessageId = message.message_id;
+  },
+});
+```
+
+Use `onSent` when later steps need to edit, pin, unpin, or forward a message by id.
+
+## Parse-Mode Fallback
+
+```ts
+send("<b>Broken HTML on purpose", { parseMode: "HTML" });
+```
+
+If Telegram rejects a message because entities cannot be parsed, Fluxgram retries once without parse mode and sends the raw text.
+
+## Forward, Pin, Unpin
+
+```ts
+forward({ fromStore: "sourceMessageId" }, { toChatId: reviewChatId });
+pin("most_recent_bot", { disableNotification: true });
+unpin("most_recent_bot");
+```
+
+Pinning checks permissions in groups and degrades to an explanatory message if the bot cannot pin.

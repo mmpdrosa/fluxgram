@@ -1,0 +1,107 @@
+---
+title: Runtime
+description: Commands, message triggers, middleware, queueing, hooks, and client events.
+---
+
+`Fluxgram` is the grammY-facing runtime. It registers flows, wires update handlers, and delegates execution to the engine.
+
+```ts
+const fx = new Fluxgram(bot, {
+  storage: new MemoryStorage(),
+  onFlowError: (ctx) => send(`Recovered: ${String(ctx.error)}`),
+});
+```
+
+## Commands And Cancellation
+
+```ts
+fx.command("start", "start");
+fx.commands(["menu", "home"], "menu", { overrideActive: true });
+fx.cancelCommand("cancel", {
+  text: "Cancelled.",
+  notActiveText: "Nothing to cancel.",
+});
+```
+
+`overrideActive` kills active or waiting flows in the chat before the command runs. Use it for reset commands like `/start`, `/cancel`, or `/clear`.
+
+## Message Triggers
+
+```ts
+fx.onMessage({ regex: /support/i }, fx.flow("support", [send("How can we help?")]));
+fx.onMessage({ filter: (msg) => msg.photo !== undefined }, "photo-review");
+```
+
+Plain message triggers run only when no flow is waiting for that chat. Waiting prompts consume messages first.
+
+## Middleware
+
+```ts
+fx.use(async (ctx, next) => {
+  if (ctx.chatId < 0 && ctx.scope === "command:/start") {
+    return ctx.block();
+  }
+  ctx.params.store = { source: ctx.scope };
+  return next();
+});
+```
+
+Middleware can block a start, set initial store data, or replace the flow before it starts. Scopes can target all flows, commands, messages, or programmatic starts.
+
+## Queueing
+
+Fluxgram serializes execution per chat and allows different chats to run concurrently. This prevents double-click and waiter cleanup races while keeping independent chats responsive.
+
+Durable timers release the queue while they wait. Active async steps hold the queue until they finish.
+
+## Runtime Lifecycle
+
+```ts
+await fx.init();
+await fx.sweep();
+await fx.start();
+await fx.stop();
+```
+
+`start()` calls `init()`, starts the recovery sweep interval, and starts grammY long polling. Use `init()` directly when another server routes updates and you need Fluxgram ready before handling them.
+
+## Active Flows
+
+```ts
+const active = await fx.listActive({ chatId });
+const handle = active[0] ? await fx.getFlowHandle(active[0].id) : null;
+await fx.gcFlows(active.map((item) => item.id));
+```
+
+Use active flow inspection for admin tools, support dashboards, cleanup jobs, and cancel/reset behavior that is more specific than `cancelCommand`.
+
+## Broadcasts
+
+```ts
+const result = await fx.broadcast(chatIds, "Maintenance starts in 10 minutes.", {
+  parseMode: "HTML",
+  onProgress: (done, total) => console.log(`${done}/${total}`),
+});
+```
+
+`broadcast` sends through the same throttled API path as flow messages. Dead chats are reported separately and their active flow states are cleaned up.
+
+## Group Lifecycle
+
+```ts
+fx.onAddedToGroup("group-setup");
+fx.onBecameAdmin("admin-setup");
+fx.onLostAdmin("admin-lost");
+fx.onGroupMigrated("group-migrated");
+```
+
+Fluxgram also tracks group-to-supergroup migrations. `sanitizeChatId` resolves current chat ids, and `getOriginalChatId` can map a migrated supergroup id back to the original id when known.
+
+## Hooks And Client Events
+
+```ts
+fx.onBotSentMessage((message) => console.log(message.message_id));
+fx.onBotHandledMessage((message) => console.log(message.chat.id));
+```
+
+`FluxgramClient` can send cross-process events through an event bus for actions such as `sendMessage` and `initiateFlow`.

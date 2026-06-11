@@ -1,0 +1,79 @@
+---
+title: Events
+description: Start flows and send messages from external processes with event buses and FluxgramClient.
+---
+
+## Event Bus Contract
+
+Event buses deliver events from external processes to the bot process. Delivery is at least once. Use `uniqueKey` for idempotency and `oneAtATimeKey` when events for the same resource must run serially.
+
+## Bot Process Setup
+
+```ts
+import { Fluxgram } from "fluxgram";
+import { MongoEventBus } from "fluxgram/events/mongo";
+
+const events = await MongoEventBus.connect(Bun.env.MONGODB_URL!, {
+  botId: bot.botInfo.id,
+  db: "bot",
+});
+
+const fx = new Fluxgram(bot, {
+  storage,
+  events,
+});
+```
+
+## External Process Client
+
+```ts
+import { FluxgramClient } from "fluxgram";
+import { MongoEventBus } from "fluxgram/events/mongo";
+
+const events = await MongoEventBus.connect(Bun.env.MONGODB_URL!, {
+  botId: 123456,
+  db: "bot",
+});
+
+const client = new FluxgramClient({ events });
+
+await client.sendMessage(chatId, "Your report is ready.", {
+  uniqueKey: `report-ready:${reportId}`,
+});
+
+await client.initiateFlow("report-review", chatId, {
+  store: { reportId },
+  uniqueKey: `review:${reportId}`,
+});
+```
+
+## Built-In Events
+
+`FluxgramClient.sendMessage` publishes `fluxgram:sendMessage`. `FluxgramClient.initiateFlow` publishes `fluxgram:initiateFlow`. The bot process registers handlers for both when `events` is configured.
+
+## Custom Events
+
+```ts
+fx.onEvent("billing:invoice-paid", async (payload) => {
+  await fx.initiateFlow("invoice-paid", Number(payload.chatId), {
+    store: { invoiceId: payload.invoiceId },
+  });
+});
+
+await client.emit(
+  "billing:invoice-paid",
+  { chatId, invoiceId },
+  { uniqueKey: `invoice-paid:${invoiceId}`, oneAtATimeKey: `chat:${chatId}` },
+);
+```
+
+## Redis Event Bus
+
+```ts
+import { RedisEventBus } from "fluxgram/events/redis";
+
+const events = await RedisEventBus.connect(Bun.env.REDIS_URL!, {
+  botId: bot.botInfo.id,
+  prefix: "fx",
+});
+```

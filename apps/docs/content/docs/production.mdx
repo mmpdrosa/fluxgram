@@ -1,0 +1,36 @@
+---
+title: Production
+description: Production choices for durable storage, recovery, deploys, throttling, and operations.
+---
+
+## Production Checklist
+
+- Use durable storage instead of `MemoryStorage`.
+- Call `await bot.init()` before constructing `Fluxgram` unless `botInfo` is already known.
+- Call `await fx.start()` for long polling, or `await fx.init()` before routing webhook updates.
+- Configure `timerThresholdSecs` for the shortest delay that must survive restarts.
+- Keep `sweepIntervalMs` low enough for timer latency and high enough for storage load.
+- Use explicit flow versions when changing flow shape while conversations may be active.
+- Keep outbound throttling enabled unless another transformer handles rate limits.
+- Add at least one observability sink before launch.
+- Shut down with `await fx.stop()` so the engine drains active work.
+
+## Durable Storage
+
+Durable storage preserves flow state, prompt waiters, timers, chat migrations, and key-value metadata. A production adapter must claim waiters atomically and use compare-and-swap writes when an expected revision is supplied.
+
+## Flow Shape Changes
+
+Fluxgram resumes from persisted paths. If a deploy moves, inserts, or removes steps in a running flow, persisted paths can point at different work. Use flow versions and choose a version mismatch policy that matches your product behavior.
+
+## Throttling And Sanitization
+
+Fluxgram installs outbound transformers for chat id sanitization and throttling. Sanitization follows group-to-supergroup migrations. Throttling is enabled by default and can be customized with `throttle` or disabled with `throttle: false`.
+
+## Shutdown
+
+```ts
+process.on("SIGTERM", () => {
+  void fx.stop().finally(() => process.exit(0));
+});
+```

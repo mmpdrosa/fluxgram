@@ -1,0 +1,30 @@
+---
+title: Why Fluxgram
+description: Why Fluxgram exists and when it is the right tool for a Telegram bot.
+---
+
+## Purpose
+
+Fluxgram is for bots where a conversation spans more than one update. It gives you a durable execution model for workflows that ask questions, wait, branch, retry, sleep, and resume after a restart.
+
+## Use Fluxgram When
+
+- You need multi-step conversations with prompts and validation.
+- You need timers or reminders that survive process restarts.
+- You want one chat's updates serialized without blocking other chats.
+- You need to start flows from commands, messages, cron jobs, web backends, or admin tools.
+- You want observable flow execution instead of scattered log lines.
+
+## Use Plain grammY When
+
+- Your bot only responds to simple stateless commands.
+- You do not need durable prompts, timers, or flow recovery.
+- You want full manual control over every update handler and storage record.
+
+## How It Fits With grammY
+
+You still use grammY for the bot process and Telegram API access. Fluxgram wires grammY updates into a flow engine and uses grammY's API transformer chain for outbound sends, throttling, and chat id sanitization.
+
+## Core Tradeoff
+
+Fluxgram persists paths into registered flow trees. That makes resume durable, but it also means flow shape matters across deploys. When you change a running flow, use flow versions and version mismatch behavior deliberately.

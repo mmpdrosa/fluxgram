@@ -1,0 +1,58 @@
+---
+title: Getting Started
+description: Install Fluxgram, create a grammY bot, and register your first durable flow.
+---
+
+## Install
+
+```sh
+bun add fluxgram grammy
+```
+
+## Create The Bot
+
+```ts
+import { Bot } from "grammy";
+import { Fluxgram, MemoryStorage, prompt, send } from "fluxgram";
+
+const bot = new Bot(Bun.env.BOT_TOKEN!);
+await bot.init();
+
+const fx = new Fluxgram(bot, {
+  storage: new MemoryStorage(),
+});
+
+const start = fx.flow("start", [
+  send("Welcome. I will remember where you are in this flow."),
+  prompt.text("What should I call you?", { store: "name" }),
+  (ctx) => send(`Nice to meet you, ${ctx.store.name}.`),
+]);
+
+fx.command("start", start);
+
+await fx.start();
+```
+
+## Initialize Before Constructing Fluxgram
+
+Fluxgram needs the bot identity to namespace durable flow state. Call `await bot.init()` before `new Fluxgram(bot, ...)`, or construct the grammY bot with known `botInfo`.
+
+## Memory Storage Is For Local Development
+
+`MemoryStorage` is useful for local development and tests. Use a durable adapter for production so prompts, timers, and migration metadata survive restarts.
+
+## What Happens At Runtime
+
+`/start` starts the named flow. The text prompt stores a waiter. The next message from the chat claims that waiter, validates or stores the answer, and resumes the flow from the next step.
+
+## Important Runtime Rules
+
+Commands and message triggers run through the same per-chat engine queue as flows. While a prompt is waiting, incoming messages in that chat are treated as the prompt answer before command or `onMessage` routing, except commands registered with `overrideActive`.
+
+```ts
+fx.command("cancel", fx.flow("cancel", [send("Cancelled.")]), {
+  overrideActive: true,
+});
+```
+
+Use `overrideActive` for commands that should interrupt a waiting flow, such as `/cancel`, `/clear`, or a main menu reset.

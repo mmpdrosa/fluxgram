@@ -1,0 +1,82 @@
+---
+title: Flows
+description: Define reusable flow trees from plain step descriptors and dynamic functions.
+---
+
+A flow is a named tree of steps. Fluxgram persists paths into that tree, not the step objects themselves, so flow structure matters for durable resume.
+
+## Flow Trees
+
+A flow is registered with `fx.flow(name, root, opts)`. The root can be a step, an array of steps, or a dynamic function. Arrays normalize to `steps` nodes; functions normalize to dynamic steps.
+
+```ts
+const profile = fx.flow("profile", [
+  send("Let's build your profile."),
+  set("started", true),
+  prompt.text("Name?", { store: "name" }),
+  (ctx) => send(`Saved ${ctx.store.name} for chat ${ctx.chatId}.`),
+]);
+
+fx.command("profile", profile);
+```
+
+## Persisted Paths
+
+Fluxgram persists paths into the normalized tree, not JavaScript closures or step objects. Changing the shape of a running flow can make old paths invalid, so production deploys should use explicit versions and a version mismatch policy.
+
+## Dynamic Steps
+
+```ts
+fx.flow("dynamic", [
+  (ctx) => {
+    if (ctx.store.name === undefined) return send("No name yet.");
+    return send(`Name: ${ctx.store.name}`);
+  },
+]);
+```
+
+## Flow Context
+
+Dynamic steps receive a flow context. The examples in these docs use `ctx.store` for persisted per-flow data, `ctx.chatId` for the current Telegram chat, and values seeded by `initiateFlow(..., { store })` for programmatic starts.
+
+## Step Factories
+
+Fluxgram exports factories for common Telegram workflow actions:
+
+```ts
+import {
+  branch,
+  callFlow,
+  forward,
+  humanSleep,
+  pin,
+  prompt,
+  send,
+  set,
+  sleep,
+  steps,
+  unpin,
+  waitFor,
+} from "fluxgram";
+```
+
+Arrays become `steps` nodes. Functions become dynamic nodes and receive a `FlowContext`.
+
+```ts
+fx.flow("status", [set("started", true), (ctx) => send(`Chat ${ctx.chatId} is active.`)]);
+```
+
+## Branching
+
+```ts
+const flow = fx.flow("branching", [
+  prompt.text("Type yes or no.", { store: "answer" }),
+  branch(
+    (ctx) => String(ctx.store.answer).toLowerCase() === "yes",
+    send("You chose yes."),
+    send("You chose something else."),
+  ),
+]);
+```
+
+If the condition throws and you provide an error arm, Fluxgram runs that error arm. Otherwise the error is routed through the flow error handler.

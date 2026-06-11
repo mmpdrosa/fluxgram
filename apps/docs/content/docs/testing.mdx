@@ -1,0 +1,70 @@
+---
+title: Testing
+description: Test Fluxgram flows without Telegram network calls.
+---
+
+`fluxgram/testing` exports `TestHarness`, a fake engine and Bot API for testing flows without Telegram network calls.
+
+## Test Harness
+
+```ts
+import { expect, test } from "bun:test";
+import { prompt, send } from "fluxgram";
+import { TestHarness } from "fluxgram/testing";
+
+test("stores a prompt answer", async () => {
+  const h = TestHarness.create();
+  h.register("start", [
+    prompt.text("Name?", { store: "name" }),
+    (ctx) => send(`Hello ${ctx.store.name}`),
+  ]);
+
+  await h.initiateFlow("start");
+  expect(h.sent.at(-1)?.text).toBe("Name?");
+
+  await h.sendUser("Ada");
+  expect(h.sent.at(-1)?.text).toBe("Hello Ada");
+});
+```
+
+## Restart Testing
+
+```ts
+const h = TestHarness.create();
+h.register("start", [prompt.text("Name?", { store: "name" }), send("Saved.")]);
+
+await h.initiateFlow("start");
+h.restart();
+await h.sendUser("Ada");
+```
+
+`restart()` rebuilds the engine and registry on the same storage. Replies and clicks after restart prove durable resume behavior.
+
+## Timer Testing
+
+```ts
+h.register("reminder", [sleep(60), send("Reminder.")]);
+await h.initiateFlow("reminder");
+h.clock.advance(60_000);
+await h.sweep();
+```
+
+The harness clock drives `now()` deterministically, so tests can advance time and run `sweep()` instead of sleeping.
+
+## Button Testing
+
+```ts
+h.register("buttons", [
+  prompt.buttons("Choose", {
+    buttons: [btn("A", send("A selected")), btn("B", send("B selected"))],
+  }),
+]);
+
+await h.initiateFlow("buttons");
+await h.clickButton("A");
+expect(h.sent.at(-1)?.text).toBe("A selected");
+```
+
+## Other Harness Records
+
+`TestHarness` records sent messages, edits, callback answers, media sends, forwards, pins, and unpins. Use those arrays to assert the bot API behavior your flow produced.

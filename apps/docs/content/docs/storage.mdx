@@ -1,0 +1,75 @@
+---
+title: Storage
+description: Understand storage adapters, MemoryStorage, and active flow inspection.
+---
+
+Fluxgram persists flow state, waiters, and key-value data through a `StorageAdapter`.
+
+```ts
+import { MemoryStorage } from "fluxgram";
+
+const fx = new Fluxgram(bot, {
+  storage: new MemoryStorage(),
+});
+```
+
+`MemoryStorage` is useful for tests and local development. It is not durable across process restarts.
+
+## Adapter Contract
+
+Durable adapters store flow state, prompt waiters, and key-value metadata. A production adapter must claim waiters atomically so one reply resumes exactly one flow, and it must support compare-and-swap writes when `expectedRev` is supplied.
+
+## SQLite
+
+```ts
+import { SqliteStorage } from "fluxgram/storage/sqlite";
+
+const storage = new SqliteStorage("./fluxgram.sqlite");
+```
+
+SQLite is the zero-infrastructure option for single-process Bun deployments.
+
+## Postgres
+
+```ts
+import { PostgresStorage } from "fluxgram/storage/postgres";
+
+const storage = await PostgresStorage.connect(Bun.env.DATABASE_URL!, {
+  tablePrefix: "fluxgram",
+});
+```
+
+## MongoDB
+
+```ts
+import { MongoStorage } from "fluxgram/storage/mongo";
+
+const storage = await MongoStorage.connect(Bun.env.MONGODB_URL!, {
+  db: "bot",
+});
+```
+
+## Redis
+
+```ts
+import { RedisStorage } from "fluxgram/storage/redis";
+
+const storage = await RedisStorage.connect(Bun.env.REDIS_URL!, {
+  prefix: "fx",
+});
+```
+
+## Active Flow Inspection
+
+```ts
+const active = await fx.listActive({ chatId });
+await fx.gcFlows(active.map((item) => item.id));
+```
+
+`listActive` returns running, waiting, and timer flow state summaries. `gcFlows` deletes flow states and associated waiters.
+
+## Choosing Storage
+
+Use `MemoryStorage` only for tests and local development. Use SQLite for a simple single-process deployment, Postgres or MongoDB for durable application storage, and Redis when your existing infrastructure already provides it and the active-flow scale fits its scan-based query model.
+
+A durable adapter must preserve JSON-compatible flow state and provide atomic waiter claiming so a reply resumes exactly one flow.

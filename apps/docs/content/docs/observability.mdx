@@ -1,0 +1,46 @@
+---
+title: Observability
+description: Observe flow execution with wide events, sinks, JSON logs, and evlog.
+---
+
+## Flow Events
+
+Fluxgram emits one `FlowEvent` per execution cycle: update arrival, reply, button click, timer wake, sweep, or external event. A flow event includes chat id, flow name, trigger, path, actions, outcome, duration, API call count, and error details when present.
+
+## evlog Sink
+
+```ts
+import { Fluxgram, evlogSink } from "fluxgram";
+
+const fx = new Fluxgram(bot, {
+  storage,
+  sinks: [evlogSink({ service: "support-bot" })],
+});
+```
+
+## JSON Sink
+
+```ts
+import { Fluxgram, jsonSink } from "fluxgram";
+
+const fx = new Fluxgram(bot, {
+  storage,
+  sinks: [jsonSink((line) => process.stdout.write(`${line}\n`))],
+});
+```
+
+## Custom Sink
+
+```ts
+import type { FlowEvent, ObservabilitySink } from "fluxgram";
+
+const sink: ObservabilitySink = {
+  handle(event: FlowEvent) {
+    if (event.outcome === "error") {
+      console.error("Flow failed", event);
+    }
+  },
+};
+```
+
+Observability sinks should not throw into flow execution. Treat sink failures as best-effort reporting failures, not conversation failures.

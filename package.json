@@ -1,0 +1,25 @@
+{
+  "name": "fluxgram-repo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "bun --filter fluxgram test",
+    "typecheck": "bun --filter fluxgram typecheck && bun --filter kitchen-demo typecheck && bun --filter fluxgram-docs typecheck",
+    "lint": "bun --filter fluxgram lint && bun --filter kitchen-demo lint && bun --filter fluxgram-docs lint",
+    "format": "oxfmt packages apps",
+    "format:check": "oxfmt --check packages apps",
+    "docs:dev": "bun --filter fluxgram-docs dev",
+    "docs:build": "bun --filter fluxgram-docs build",
+    "docs:typecheck": "bun --filter fluxgram-docs typecheck"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
+    "typescript": "^5.5.0"
+  }
+}

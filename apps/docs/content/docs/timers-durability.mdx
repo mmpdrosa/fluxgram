@@ -1,0 +1,60 @@
+---
+title: Timers & Durability
+description: Sleep, poll, recover from crashes, and understand timer behavior.
+---
+
+Fluxgram has two kinds of waiting: inline waits and durable timers.
+
+## Durable Timer Threshold
+
+```ts
+const fx = new Fluxgram(bot, {
+  storage,
+  timerThresholdSecs: 30,
+});
+```
+
+`sleep(10)` waits inline with this configuration. `sleep(60)` stores timer state and releases the per-chat queue until a sweep wakes the flow.
+
+```ts
+fx.flow("reminder", [send("I will remind you later."), sleep(60), send("Reminder.")]);
+```
+
+## Humanized Sleep
+
+```ts
+humanSleep(2);
+```
+
+`humanSleep` adds bounded jitter around the target duration for less mechanical short waits.
+
+## Polling With waitFor
+
+```ts
+waitFor(() => paymentProvider.isPaid(invoiceId), {
+  everySecs: 15,
+  timeoutSecs: 900,
+  onTimeout: send("Payment window expired."),
+});
+```
+
+`waitFor` stores durable timer state between polls. If the check succeeds, the flow continues. If the deadline passes, Fluxgram runs `onTimeout` when provided and then continues.
+
+## Recovery
+
+The engine recovery sweep resumes due timers and stale running docs. With durable storage, this is what lets a process restart continue a conversation instead of losing the path.
+
+```ts
+await fx.init();
+await fx.sweep();
+```
+
+`start()` runs sweeps periodically using `sweepIntervalMs`. For webhook-style processes, call `init()` before handling updates and arrange your own periodic `sweep()`.
+
+## Retention And Stale Runs
+
+`doneRetentionMs` controls how long completed flow documents remain before cleanup. `runningGraceMs` controls when a running document is considered stale enough for recovery after a crash.
+
+## Deploys And Flow Versions
+
+Durability depends on persisted paths into the flow tree. If a deploy changes a running flow's shape, old paths can become invalid or point at different work. Use `fx.flow(name, root, { version })` and a `versionMismatch` policy when changing long-running flows.

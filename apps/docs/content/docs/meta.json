@@ -1,0 +1,22 @@
+{
+  "title": "Fluxgram",
+  "pages": [
+    "index",
+    "why-fluxgram",
+    "use-cases",
+    "getting-started",
+    "flows",
+    "prompts",
+    "control-flow",
+    "messaging",
+    "runtime",
+    "timers-durability",
+    "storage",
+    "production",
+    "events",
+    "observability",
+    "debug-chat",
+    "testing",
+    "api-reference"
+  ]
+}

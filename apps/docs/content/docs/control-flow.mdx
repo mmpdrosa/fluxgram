@@ -1,0 +1,55 @@
+---
+title: Control Flow
+description: Compose larger conversations with subflows, returns, and continuations.
+---
+
+Fluxgram includes flow-level control primitives for conversations that should be split into reusable units.
+
+## Branching
+
+```ts
+branch(
+  (ctx) => ctx.store.plan === "pro",
+  send("Pro path."),
+  send("Free path."),
+  send("Could not evaluate plan."),
+);
+```
+
+The fourth argument is an optional error arm. If the condition throws and no error arm exists, Fluxgram routes the error through the flow error handler.
+
+## Subflows
+
+Use `callFlow` to run a child flow with an isolated store, then return a value to the caller.
+
+```ts
+const collectName = [prompt.text("Name?", { store: "name" }), ret.fromStore("name")];
+
+const profile = fx.flow("profile", [
+  callFlow(collectName, { storeResult: "name" }),
+  (ctx) => send(`Stored ${ctx.store.name}.`),
+]);
+```
+
+`ret(value)` exits a subflow early. If a subflow finishes without `ret`, the caller receives `undefined`.
+
+## Continuations
+
+Continuations are useful for menu loops and back buttons.
+
+```ts
+const MENU_CC = "menu";
+
+fx.flow("menu", [
+  storeCC(MENU_CC),
+  prompt.buttons("Choose:", {
+    reuseMessage: true,
+    buttons: [
+      btn("Settings", [send("Settings"), redirectCC(MENU_CC)]),
+      btn("Exit", send("Closed.")),
+    ],
+  }),
+]);
+```
+
+`storeCC` saves the point after itself. `redirectCC` jumps back to that point. `callCC` lets you run a body while keeping a named continuation available.

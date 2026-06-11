@@ -1,0 +1,59 @@
+---
+title: Introduction
+description: Durable, resumable Telegram bot flows for Bun and TypeScript.
+---
+
+Fluxgram is a TypeScript library for building Telegram bots as durable flow trees. It sits on top of grammY and gives you primitives for prompts, buttons, media, timers, branching, subflows, continuations, runtime events, storage, testing, and observability.
+
+## What Problem Fluxgram Solves
+
+Telegram bots often start as simple command handlers and quickly become state machines: ask a question, wait for an answer, validate it, branch, show buttons, sleep until later, resume after a deploy, and clean up after blocked chats. Fluxgram makes that state machine explicit.
+
+## The Mental Model
+
+A flow is a named tree of step descriptors. Fluxgram persists where each chat is inside the tree, stores prompt waiters and timer wakeups, then resumes from the stored path when a reply, button click, timer, sweep, or external event arrives.
+
+## Why Developers Use It
+
+- Durable prompts and timers instead of ad-hoc session state.
+- Per-chat queueing so same-chat updates run in order.
+- Reusable flow composition through subflows and continuations.
+- Production storage adapters for SQLite, Postgres, MongoDB, and Redis.
+- Cross-process events for cron jobs, web backends, and admin tooling.
+- Observability sinks, including Telegram debug chat digests.
+- A network-free test harness for conversation flows.
+
+<Cards>
+  <Card
+    title="Why Fluxgram"
+    href="/docs/why-fluxgram"
+    description="Understand the library's purpose, fit, and tradeoffs."
+  />
+  <Card
+    title="Getting Started"
+    href="/docs/getting-started"
+    description="Install Fluxgram and build your first flow."
+  />
+  <Card
+    title="Debug Chat"
+    href="/docs/debug-chat"
+    description="Send flow execution digests to a Telegram debug channel."
+  />
+  <Card
+    title="Testing"
+    href="/docs/testing"
+    description="Test flows without a Telegram network connection."
+  />
+</Cards>
+
+## What Fluxgram Handles
+
+- Per-chat execution serialization, so same-chat work runs in order.
+- Durable prompt waiters and timer states through the storage adapter.
+- Flow version mismatch policies for deploys that change a running flow shape.
+- Message chunking and parse-mode fallback for Telegram send limits.
+- Commands, message triggers, middleware, group lifecycle hooks, and programmatic flow starts.
+
+## What You Still Own
+
+Fluxgram does not hide Telegram from you. You still create the grammY bot, choose storage, decide command names, configure permissions, deploy the process, and design your flow text and UX.

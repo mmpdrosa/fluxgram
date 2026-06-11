@@ -1,0 +1,58 @@
+---
+title: Debug Chat
+description: Send batched flow execution digests to a Telegram debug chat.
+---
+
+## What Debug Chat Does
+
+`DebugChatSink` batches flow events by origin chat, posts digest messages to a Telegram debug channel, forwards referenced source messages when possible, writes oversized entries as documents, and forwards notify digests to an escalation chat.
+
+## Basic Setup
+
+```ts
+import { Bot } from "grammy";
+import { DebugChatSink, Fluxgram } from "fluxgram";
+
+const bot = new Bot(Bun.env.BOT_TOKEN!);
+await bot.init();
+
+const debugChat = new DebugChatSink({
+  api: bot.api,
+  chatId: Number(Bun.env.DEBUG_CHAT_ID!),
+  notifyChatId: Number(Bun.env.NOTIFY_CHAT_ID!),
+  tags: ["@oncall"],
+  autoFlushMs: 5000,
+  ctxFormatter: (event) =>
+    event.flow === undefined ? `Chat ${event.chatId}` : `Chat ${event.chatId} / ${event.flow}`,
+});
+
+const fx = new Fluxgram(bot, {
+  storage,
+  sinks: [debugChat],
+});
+```
+
+## Manual Flush And Shutdown
+
+```ts
+await debugChat.flush();
+debugChat.stop();
+```
+
+Flush manually when you want deterministic delivery in tests or during shutdown. Call `stop()` to clear the auto-flush timer.
+
+## Required Bot Permissions
+
+The bot must be able to send messages to the debug chat. Forwarded source messages and escalation forwards are best-effort because Telegram privacy settings can block forwarding.
+
+## What Appears In The Digest
+
+- One header per origin chat.
+- A timestamped line for each flow action.
+- Error outcomes with message text.
+- Notify lines tagged with configured `tags`.
+- Forwarded source messages when an action records `forwardMessageId`.
+
+## Overflow And Deduplication
+
+Telegram messages are capped at 4096 characters. `DebugChatSink` packs digest lines under that limit and uploads oversized single entries as documents when `sendDocument` is available. Actions with the same `uniqueKey` are deduplicated inside the sink's in-memory horizon.
