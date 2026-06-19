@@ -14,6 +14,11 @@
     "workflow"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mmpdrosa/fluxgram.git",
+    "directory": "packages/fluxgram"
+  },
   "files": [
     "dist",
     "src",
