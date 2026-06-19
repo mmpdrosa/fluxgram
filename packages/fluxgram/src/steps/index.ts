@@ -328,16 +328,34 @@ export function branch(
   return { kind: "branch", cond, children };
 }
 
+/** A registered/defined flow usable as a subflow body: anything with a name and a root. */
+export interface FlowRef {
+  name: string;
+  root: StepLike;
+}
+
+function isFlowRef(target: StepLike | FlowRef): target is FlowRef {
+  return (
+    typeof target === "object" &&
+    target !== null &&
+    !Array.isArray(target) &&
+    "root" in target &&
+    "name" in target
+  );
+}
+
 /**
  * Run a subflow with an isolated store (seeded from args). A `ret(...)` inside
  * it pops back here, placing the returned value in `storeResult` on the caller.
- * SPEC §5.3 — target is a StepLike; named cross-flow references come later.
+ * The target is a StepLike, or a flow reference (a `defineFlow` spec or a
+ * registered `FlowDef`) whose root is reused as the subflow body.
  */
 export function callFlow(
-  target: StepLike,
+  target: StepLike | FlowRef,
   opts?: { args?: CallFlowStep["args"]; storeResult?: string },
 ): CallFlowStep {
-  const step: CallFlowStep = { kind: "callflow", children: [normalize(target)] };
+  const body = isFlowRef(target) ? target.root : target;
+  const step: CallFlowStep = { kind: "callflow", children: [normalize(body)] };
   if (opts?.args !== undefined) step.args = opts.args;
   if (opts?.storeResult !== undefined) step.storeResult = opts.storeResult;
   return step;

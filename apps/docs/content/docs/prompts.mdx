@@ -3,9 +3,9 @@ title: Prompts
 description: Suspend flows for text replies, whole messages, buttons, and multi-select input.
 ---
 
-Prompts create durable waiters. When the user replies or clicks a Fluxgram button, the engine resumes the flow from the stored path.
+Prompts create durable waiters. Choose the prompt by what the user should send, not by how you plan to store it.
 
-## Text Prompts
+## Text: User Should Type Words
 
 ```ts
 import { ValidationError, prompt } from "fluxgram";
@@ -22,19 +22,19 @@ prompt.text("How old are you?", {
 });
 ```
 
-The validation return value is stored. Throw `ValidationError` to keep waiting and send a retry message.
+Text prompts accept text messages. Non-text replies keep the flow waiting and ask the user to send text. The validation return value is stored. Throw `ValidationError` to keep waiting and send a retry message.
 
-## Message Prompts
+## Whole Message: User May Send Attachments
 
 ```ts
-prompt.message("Send any message.", {
-  store: "savedMessage",
+prompt.message("Send a receipt, screenshot, or any message.", {
+  store: "receiptMessage",
 });
 ```
 
-Use message prompts when you need the Telegram message id, text, attachment metadata, or other message fields.
+Use message prompts when you need attachments, the Telegram message id, text, or other message fields. This is the escape hatch for photos, documents, voice notes, and custom Telegram metadata.
 
-## Button Prompts
+## Buttons: User Should Pick One Action
 
 ```ts
 import { btn, prompt, set } from "fluxgram";
@@ -46,9 +46,9 @@ prompt.buttons("Pick one.", {
 });
 ```
 
-Button prompt children are normal steps. They can set store values, send messages, branch, or call other flows. `reuseMessage` edits the previous bot message in place, which is useful for menu-style flows.
+Button children are normal steps. They can set store values, send messages, branch, or call other flows. `reuseMessage` edits the prompt message in place, which is useful for menu-style flows.
 
-## Multi-Select
+## Multi-Select: User Should Toggle Choices
 
 ```ts
 prompt.multiSelect("Choose topics.", {
@@ -59,7 +59,21 @@ prompt.multiSelect("Choose topics.", {
 });
 ```
 
-Multi-select state is stored durably, so selected options survive a restart before submit when durable storage is used.
+Multi-select state is durable, so selected options survive a restart before submit when durable storage is used.
+
+## Validation
+
+Validation can transform the stored value or reject the answer. Throw `ValidationError` for user-correctable input.
+
+```ts
+prompt.text("Email?", {
+  store: "email",
+  validate: (_ctx, message) => {
+    if (!message.text?.includes("@")) throw new ValidationError("Send a valid email.");
+    return message.text.toLowerCase();
+  },
+});
+```
 
 ## Timeouts
 
@@ -73,7 +87,7 @@ prompt.text("Reply within a minute.", {
 
 Prompt and multi-select timeout handlers require `timeoutSecs`. Without an `onTimeout` step, a timed-out prompt ends the flow.
 
-## Group Prompts
+## Group Scoping
 
 ```ts
 prompt.text("Only the person who started this flow can answer.", {

@@ -35,7 +35,10 @@ export interface FlowStateDoc {
   /** absolute deadline for an in-flight waitFor (survives re-arming) */
   timerDeadline?: number;
   savedCC: Record<string, { path: number[]; frames: Frame[] }>;
-  /** structural hash of dynamic-step subtrees, keyed by path prefix joined with "." (§4.1 contract) */
+  /**
+   * Structural hash of dynamic-step subtrees, keyed by path prefix joined
+   * with "." (dynamic-step contract).
+   */
   dynamicHashes?: Record<string, string>;
   meta: {
     startedAt: number;

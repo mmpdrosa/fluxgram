@@ -30,7 +30,7 @@ export interface MongoEventBusOptions {
  * MongoDB-backed bus. Polling by default; on startup, events that were invoked
  * but never resolved by a previous process are re-delivered (crash recovery —
  * same recovery query used by the event invoker).
- * SPEC §7.1: change streams need a replica set; polling is the universal fallback.
+ * Change streams need a replica set; polling is the universal fallback.
  */
 export class MongoEventBus implements EventBus {
   readonly collection: Collection<MongoEventDoc>;
@@ -111,23 +111,23 @@ export class MongoEventBus implements EventBus {
     if (this.polling || !this.handler) return;
     this.polling = true;
     try {
-      const docs = await this.collection
-        .find({
-          botId: this.botId,
-          $or: [
-            { invoked: { $ne: true } },
-            // crash recovery: invoked before this process started, never resolved
-            { invoked: true, invokedTs: { $lt: this.startTs }, resolved: { $ne: true } },
-          ],
-        })
-        .sort({ _id: 1 })
-        .toArray();
-
-      for (const doc of docs) {
-        await this.collection.updateOne(
-          { _id: doc._id },
-          { $set: { invoked: true, invokedTs: Date.now() } },
+      while (true) {
+        const now = Date.now();
+        const doc = await this.collection.findOneAndUpdate(
+          {
+            botId: this.botId,
+            $or: [
+              { invoked: { $ne: true } },
+              // crash recovery: invoked before this process started, never resolved
+              { invoked: true, invokedTs: { $lt: this.startTs }, resolved: { $ne: true } },
+            ],
+          },
+          { $set: { invoked: true, invokedTs: now } },
+          { sort: { _id: 1 }, returnDocument: "after", includeResultMetadata: false },
         );
+
+        if (!doc) break;
+
         try {
           await this.handler({
             id: String(doc._id),
@@ -144,7 +144,7 @@ export class MongoEventBus implements EventBus {
         }
       }
     } catch {
-      // next poll retries; observability hooks land in phase 7
+      // next poll retries
     } finally {
       this.polling = false;
     }

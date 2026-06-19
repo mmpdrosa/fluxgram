@@ -142,6 +142,33 @@ if (process.env["MONGO_URL"]) {
       }
     });
 
+    test("two subscribers do not both handle the same event", async () => {
+      const db = `fluxgram_events_${Math.random().toString(36).slice(2)}`;
+      const busA = await MongoEventBus.connect(process.env["MONGO_URL"]!, {
+        botId: 42,
+        db,
+        pollIntervalMs: 25,
+      });
+      const busB = await MongoEventBus.connect(process.env["MONGO_URL"]!, {
+        botId: 42,
+        db,
+        pollIntervalMs: 25,
+      });
+      try {
+        const got: { bus: "a" | "b"; id: string }[] = [];
+        busA.subscribe(async (e) => void got.push({ bus: "a", id: e.id }));
+        busB.subscribe(async (e) => void got.push({ bus: "b", id: e.id }));
+
+        await busA.publish({ name: "race", payload: { n: 1 } });
+        await sleep(200);
+
+        expect(got).toHaveLength(1);
+      } finally {
+        await busA.destroy();
+        await busB.close();
+      }
+    });
+
     test("cleanup deletes old resolved events but keeps uniqueKey events for dedup", async () => {
       const db = `fluxgram_events_${Math.random().toString(36).slice(2)}`;
       const bus = await MongoEventBus.connect(process.env["MONGO_URL"]!, {

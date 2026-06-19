@@ -38,12 +38,14 @@ export type {
   PinStep,
   UnpinStep,
   MultiSelectStep,
+  FlowRef,
 } from "./steps";
 export { humanDelay } from "./util/humandelay";
 export { splitText } from "./util/chunk";
+export { assertJsonSafe } from "./util/jsonsafe";
 export { prompt, btn, btnRow } from "./steps/prompt";
-export { flowKit } from "./steps/typed";
-export type { FlowKit, TypedFlowContext } from "./steps/typed";
+export { flowKit, defineFlow } from "./steps/typed";
+export type { FlowKit, TypedFlowContext, FlowSpec } from "./steps/typed";
 export type { Btn, ButtonsOption, PromptOptions, MultiSelectOptions } from "./steps/prompt";
 export { ValidationError, isChatDead } from "./errors";
 export { FlowRegistry, structuralHash, walkPath, childrenOf } from "./engine/registry";

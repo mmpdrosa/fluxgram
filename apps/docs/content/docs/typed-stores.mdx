@@ -1,0 +1,128 @@
+---
+title: Typed Stores
+description: Opt-in compile-time checks for store keys with flowKit, and what they do and don't prove.
+---
+
+Every flow has a `ctx.store` — a JSON-compatible bag of values that persists with the
+conversation. By default it is untyped (`Record<string, unknown>`), so reads need a
+cast and key typos are not caught.
+
+`flowKit<S>()` is an **opt-in** typed authoring layer. You describe the store shape
+once, and the step factories check store keys and write value types at compile time.
+It is purely type-level: the steps it produces are identical to the untyped ones, so
+there is no runtime cost and you can mix typed and untyped flows freely.
+
+## Using flowKit
+
+```ts
+import { flowKit, send } from "fluxgram";
+
+interface Store {
+  name: string;
+  age: number;
+  tags: string[];
+  statusMessageId: number;
+}
+
+const k = flowKit<Store>();
+
+fx.flow("onboard", [
+  k.set("age", 0), // key + value checked against Store
+  k.prompt.text("Your name?", { store: "name" }),
+  k.step((ctx) => {
+    // reads are `string | undefined` — guard before use
+    if (ctx.store.name) return send(`Hi ${ctx.store.name}`);
+    return send("Hi there");
+  }),
+]);
+```
+
+`k` mirrors the factories: `k.set`, `k.send`, `k.step`, `k.branch`, `k.ret`,
+`k.pin`, `k.forward`, `k.callFlow`, and `k.prompt.*`. `k.pin`/`k.forward` check a
+`fromStore` reference against number-typed keys; `k.callFlow` checks `args` against
+the subflow's store and `storeResult` against this flow's store. Anything not on `k`
+(for example `sleep`, `steps`) is used from the normal imports.
+
+## defineFlow: store shape and flow in one place
+
+`defineFlow<S>(name, build)` ties a flow's store type to its registration. The
+builder receives the typed kit, so you declare `S` once and get a `FlowDef<S>` whose
+seeding, commands, and subflow calls are all checked:
+
+```ts
+import { defineFlow } from "fluxgram";
+
+const onboard = defineFlow<Store>("onboard", (k) => [
+  k.prompt.text("Your name?", { store: "name" }),
+  k.step((ctx) => send(`Hi ${ctx.store.name ?? "there"}`)),
+]);
+
+const def = fx.flow(onboard); // register → FlowDef<Store>
+fx.command("start", def);
+fx.initiateFlow(def, chatId, { store: { name: "ada", age: 0, tags: [], statusMessageId: 0 } });
+// @ts-expect-error — seed is checked against Store
+fx.initiateFlow(def, chatId, { store: { name: 1 } });
+```
+
+A bare function passed to `defineFlow` is treated as the builder, not a dynamic step;
+wrap a dynamic-step root in an array (`defineFlow("x", [(ctx) => …])`) if you need one.
+`callFlow(def)` reuses a registered flow's root as an isolated subflow body.
+
+## What the types prove
+
+- **Key names exist.** `k.set("nmae", …)` is a compile error.
+- **Write value types match.** `k.set("age", "old")` is a compile error.
+- **Prompt mode matches the key type.** `k.prompt.text` only accepts string-valued
+  keys, `k.prompt.multiSelect` only array-valued keys, `k.prompt.message` only
+  object-valued keys.
+- **`k.send` message ids are number keys.** `k.send("…", { storeMessageId: "name" })`
+  is a compile error because `name` is not a number.
+
+## What the types do not prove
+
+The store is a **runtime fact**, not a static one. Branches, dynamic steps,
+continuations (`storeCC`/`redirectCC`), and durable restarts all decide what is
+actually present at a given point. The types reflect this honestly:
+
+- **Presence is never guaranteed.** Reads are `T | undefined`. A key only exists once
+  the step that writes it has run, so you must guard:
+
+  ```ts
+  k.step((ctx) => {
+    const id = ctx.store.statusMessageId; // number | undefined
+    if (id === undefined) return;
+    return ctx.api.editMessageText?.(ctx.chatId, id, "done");
+  });
+  ```
+
+- **Subflows have their own store.** `callFlow` runs its body with an isolated store
+  seeded from `args`, not the caller's store. Inside a subflow, use a **separate**
+  `flowKit<SubStore>()` for that body's shape — the caller's `k` does not describe it.
+
+- **Dynamic and continuation paths are opaque.** A `dynamic` step returning a subtree,
+  or a `redirectCC` jump, can reach a point with a different set of populated keys than
+  the straight-line path suggests. The types do not model these paths.
+
+Fluxgram intentionally does **not** try to prove "after step N the store has key K".
+Doing so soundly is impossible for branchy, resumable, continuation-driven flows, and
+a type that claimed it would be wrong exactly where it matters. Guard your reads.
+
+## Storing a sent message id
+
+`k.send` adds a typed `onSent` and a `storeMessageId` shortcut for the common
+"send now, edit/pin/forward later" pattern:
+
+```ts
+fx.flow("status", [
+  k.send("Status: queued", { storeMessageId: "statusMessageId" }),
+  sleep(10),
+  k.step((ctx) => {
+    if (ctx.store.statusMessageId === undefined) return;
+    return ctx.api.editMessageText?.(ctx.chatId, ctx.store.statusMessageId, "Status: done");
+  }),
+]);
+```
+
+`storeMessageId` desugars to an `onSent` that writes `message.message_id` into the
+store; pass your own `onSent` as well and both run. See
+[Messaging](/docs/messaging) for the untyped equivalent.

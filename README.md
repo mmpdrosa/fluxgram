@@ -82,23 +82,26 @@ Docs content lives in `apps/docs/content/docs`.
 
 ## Adapter Verification
 
-Most tests do not need external services. Redis and Postgres conformance can be run against local Docker containers when changing durable adapters:
+Most tests do not need external services. CI runs Redis, Postgres, and Mongo service-backed adapter and event checks. You can run the same checks against local Docker containers when changing durable adapters:
 
 ```sh
 docker run -d --rm --name fluxgram-test-redis -p 6379:6379 redis:7-alpine
 docker run -d --rm --name fluxgram-test-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+docker run -d --rm --name fluxgram-test-mongo -p 27017:27017 mongo:7
 
-cd packages/fluxgram
 REDIS_URL=redis://localhost:6379 \
 POSTGRES_URL=postgres://postgres:postgres@localhost:5432/postgres \
-bun test tests/storage-conformance.test.ts
+MONGO_URL=mongodb://localhost:27017 \
+bun --filter fluxgram test tests/storage-conformance.test.ts tests/events.test.ts
 
+cd packages/fluxgram
+bun run build
 REDIS_URL=redis://localhost:6379 \
 POSTGRES_URL=postgres://postgres:postgres@localhost:5432/postgres \
 bun run smoke:node
 ```
 
-The Redis conformance path exercises Bun Redis and the Node `redis` package. The Postgres path exercises Bun SQL and the Node `pg` package.
+The Redis conformance path exercises Bun Redis and the Node `redis` package. The Postgres path exercises Bun SQL and the Node `pg` package. Mongo conformance and event tests exercise the MongoDB adapter and bus.
 
 ## Publishing Package Changes
 

@@ -8,6 +8,8 @@ import {
   msgUpdate,
 } from "../testing/grammy-kit";
 import { Fluxgram } from "../src/fluxgram";
+import { FluxgramClient } from "../src/client";
+import { InProcessEventBus } from "../src/events/inprocess";
 import { MemoryStorage } from "../src/storage/memory";
 import { send, set } from "../src/steps";
 import { btn, prompt } from "../src/steps/prompt";
@@ -40,6 +42,32 @@ describe("Fluxgram over grammY", () => {
     await bot.handleUpdate(msgUpdate(7, "/start"));
     await bot.handleUpdate(msgUpdate(7, "matheus"));
     expect(sentTexts()).toEqual(["Name?", "hi matheus"]);
+  });
+
+  test("non-text messages do not answer text prompts", async () => {
+    const { bot, fx, sentTexts } = await makeFluxgram();
+    fx.command(
+      "start",
+      fx.flow("ask", [
+        prompt.text("Name?", { store: "name" }),
+        (ctx: FlowContext) => send(`hi ${ctx.store["name"]}`),
+      ]),
+    );
+
+    await bot.handleUpdate(msgUpdate(7, "/start"));
+    await bot.handleUpdate(
+      msgUpdate(7, "", {
+        text: undefined,
+        photo: [{ file_id: "p", file_unique_id: "u", width: 1, height: 1 }],
+      }),
+    );
+
+    const [active] = await fx.listActive();
+    expect(active?.status).toBe("waiting");
+
+    await bot.handleUpdate(msgUpdate(7, "matheus"));
+    expect(sentTexts()).toEqual(["Name?", "Please send a text message to answer.", "hi matheus"]);
+    expect(await fx.listActive()).toHaveLength(0);
   });
 
   test("button clicks route via callback_query updates and get answered", async () => {
@@ -204,6 +232,61 @@ describe("chat migrations", () => {
     await fx2.initiateFlow("notify", -100);
     const sendCall = second.calls.find((c) => c.method === "sendMessage")!;
     expect(sendCall.payload["chat_id"]).toBe(-100999);
+  });
+
+  test("cancel in a migrated chat clears a prompt stored under the old chat", async () => {
+    const { bot, fx, sentTexts } = await makeFluxgram();
+    fx.command("start", fx.flow("ask", [prompt.text("Q?", { store: "a" }), send("never")]));
+    fx.cancelCommand("cancel");
+
+    await bot.handleUpdate(msgUpdate(-100, "/start"));
+    await bot.handleUpdate(msgUpdate(-100, "", { migrate_to_chat_id: -200, text: undefined }));
+    await bot.handleUpdate(msgUpdate(-200, "/cancel"));
+
+    expect(sentTexts()).toEqual(["Q?", "Cancelled."]);
+    expect(await fx.listActive()).toHaveLength(0);
+
+    await bot.handleUpdate(msgUpdate(-200, "stray"));
+    expect(sentTexts()).toEqual(["Q?", "Cancelled."]);
+  });
+
+  test("overrideActive in a migrated chat clears the old waiting flow", async () => {
+    const { bot, fx, sentTexts } = await makeFluxgram();
+    fx.command("start", fx.flow("ask", [prompt.text("Q?", { store: "a" }), send("never")]));
+    fx.command("reset", fx.flow("reset", [send("reset ran")]), { overrideActive: true });
+
+    await bot.handleUpdate(msgUpdate(-100, "/start"));
+    await bot.handleUpdate(msgUpdate(-100, "", { migrate_to_chat_id: -200, text: undefined }));
+    await bot.handleUpdate(msgUpdate(-200, "/reset"));
+
+    expect(sentTexts()).toEqual(["Q?", "reset ran"]);
+    expect(await fx.listActive()).toHaveLength(0);
+  });
+
+  test("listActive for a migrated chat includes flows stored under the old chat", async () => {
+    const { bot, fx } = await makeFluxgram();
+    fx.command("start", fx.flow("ask", [prompt.text("Q?", { store: "a" }), send("done")]));
+
+    await bot.handleUpdate(msgUpdate(-100, "/start"));
+    await bot.handleUpdate(msgUpdate(-100, "", { migrate_to_chat_id: -200, text: undefined }));
+
+    const active = await fx.listActive({ chatId: -200 });
+    expect(active).toHaveLength(1);
+    expect(active[0]?.chatId).toBe(-100);
+  });
+
+  test("event clearWaiters in a migrated chat clears old-chat waiting flows", async () => {
+    const events = new InProcessEventBus();
+    const { bot, fx, sentTexts } = await makeFluxgram({ events });
+    const client = new FluxgramClient({ events });
+    fx.command("start", fx.flow("ask", [prompt.text("Q?", { store: "a" }), send("never")]));
+
+    await bot.handleUpdate(msgUpdate(-100, "/start"));
+    await bot.handleUpdate(msgUpdate(-100, "", { migrate_to_chat_id: -200, text: undefined }));
+    await client.sendMessage(-200, "cleared", { clearWaiters: true });
+
+    expect(sentTexts()).toEqual(["Q?", "cleared"]);
+    expect(await fx.listActive()).toHaveLength(0);
   });
 });
 

@@ -103,6 +103,7 @@ export class TestHarness {
   private onFlowError: FlowErrorHandler | undefined;
   private versionMismatch: VersionMismatchPolicy | undefined;
   private sinks: EngineOptions["sinks"];
+  private validateStoreJson: boolean | undefined;
   private clockTime = 1_000_000_000;
 
   /** Deterministic fake clock driving the engine's now(); advance to fire timers via sweep(). */
@@ -118,6 +119,7 @@ export class TestHarness {
     onFlowError?: FlowErrorHandler;
     versionMismatch?: VersionMismatchPolicy;
     sinks?: EngineOptions["sinks"];
+    validateStoreJson?: boolean;
   }): TestHarness {
     return new TestHarness(opts);
   }
@@ -127,11 +129,13 @@ export class TestHarness {
     onFlowError?: FlowErrorHandler;
     versionMismatch?: VersionMismatchPolicy;
     sinks?: EngineOptions["sinks"];
+    validateStoreJson?: boolean;
   }) {
     this.storage = opts?.storage ?? new MemoryStorage();
     this.onFlowError = opts?.onFlowError;
     this.versionMismatch = opts?.versionMismatch;
     this.sinks = opts?.sinks;
+    this.validateStoreJson = opts?.validateStoreJson;
     this.build();
   }
 
@@ -224,6 +228,9 @@ export class TestHarness {
       ...(this.onFlowError ? { onFlowError: this.onFlowError } : {}),
       ...(this.versionMismatch ? { versionMismatch: this.versionMismatch } : {}),
       ...(this.sinks ? { sinks: this.sinks } : {}),
+      ...(this.validateStoreJson === undefined
+        ? {}
+        : { validateStoreJson: this.validateStoreJson }),
       now: () => this.clockTime,
     });
   }

@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "test": "bun --filter fluxgram test",
+    "check": "bun run lint && bun run format:check && bun run typecheck",
+    "build": "bun --filter fluxgram build",
     "typecheck": "bun --filter fluxgram typecheck && bun --filter kitchen-demo typecheck && bun --filter fluxgram-docs typecheck",
     "lint": "bun --filter fluxgram lint && bun --filter kitchen-demo lint && bun --filter fluxgram-docs lint",
     "format": "oxfmt packages apps",

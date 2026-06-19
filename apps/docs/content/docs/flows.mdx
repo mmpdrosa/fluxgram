@@ -3,80 +3,80 @@ title: Flows
 description: Define reusable flow trees from plain step descriptors and dynamic functions.
 ---
 
-A flow is a named tree of steps. Fluxgram persists paths into that tree, not the step objects themselves, so flow structure matters for durable resume.
+A flow is a named tree of steps. Fluxgram persists paths into that tree, so a chat can wait at a prompt or timer and later resume from the same position.
 
-## Flow Trees
-
-A flow is registered with `fx.flow(name, root, opts)`. The root can be a step, an array of steps, or a dynamic function. Arrays normalize to `steps` nodes; functions normalize to dynamic steps.
+## Start With A Real Flow
 
 ```ts
-const profile = fx.flow("profile", [
-  send("Let's build your profile."),
-  set("started", true),
-  prompt.text("Name?", { store: "name" }),
-  (ctx) => send(`Saved ${ctx.store.name} for chat ${ctx.chatId}.`),
+const checkout = fx.flow("checkout", [
+  send("Let's start checkout."),
+  prompt.text("Email?", { store: "email" }),
+  prompt.buttons("Shipping speed?", {
+    buttons: [
+      btn("Standard", set("shipping", "standard")),
+      btn("Express", set("shipping", "express")),
+    ],
+  }),
+  (ctx) => send(`Receipt will go to ${ctx.store.email}. Shipping: ${ctx.store.shipping}.`),
 ]);
 
-fx.command("profile", profile);
+fx.command("checkout", checkout);
 ```
 
-## Persisted Paths
+The array is normalized into a durable flow tree. The prompt path is stored when the flow waits; the next reply or button click resumes from that path.
 
-Fluxgram persists paths into the normalized tree, not JavaScript closures or step objects. Changing the shape of a running flow can make old paths invalid, so production deploys should use explicit versions and a version mismatch policy.
+## Paths Through The Tree
+
+Fluxgram stores path indexes, not JavaScript closures. In the checkout flow, the email prompt and shipping prompt have stable positions in the tree. If the process restarts after the email question, durable storage still knows which path is waiting.
+
+That durability is why flow shape matters. Adding a step before an active prompt changes the path. For production deploys, use explicit versions when you change the shape of a flow that may already be active.
+
+```ts
+fx.flow("checkout", checkoutSteps, { version: 2 });
+```
 
 ## Dynamic Steps
 
+Functions are dynamic steps. They receive `ctx`, can read `ctx.store`, and may return another step or array of steps.
+
 ```ts
 fx.flow("dynamic", [
+  prompt.text("Age?", { store: "age" }),
   (ctx) => {
-    if (ctx.store.name === undefined) return send("No name yet.");
-    return send(`Name: ${ctx.store.name}`);
+    const age = Number(ctx.store.age);
+    if (age < 18) return send("A guardian must continue this flow.");
+    return send("You can continue.");
   },
 ]);
 ```
 
-## Flow Context
+Dynamic steps are useful for small decisions close to the conversation. For larger branches, use `branch` so the shape is easier to see.
 
-Dynamic steps receive a flow context. The examples in these docs use `ctx.store` for persisted per-flow data, `ctx.chatId` for the current Telegram chat, and values seeded by `initiateFlow(..., { store })` for programmatic starts.
+## Store
 
-## Step Factories
-
-Fluxgram exports factories for common Telegram workflow actions:
+`ctx.store` is persisted with the flow state. Prompt `store` options write into it, `set(...)` writes explicit values, and programmatic starts can seed it.
 
 ```ts
-import {
-  branch,
-  callFlow,
-  forward,
-  humanSleep,
-  pin,
-  prompt,
-  send,
-  set,
-  sleep,
-  steps,
-  unpin,
-  waitFor,
-} from "fluxgram";
+await fx.initiateFlow("checkout", chatId, {
+  store: { cartId: "cart_123" },
+});
 ```
 
-Arrays become `steps` nodes. Functions become dynamic nodes and receive a `FlowContext`.
+Keep store values JSON-compatible when using durable adapters. Fluxgram enforces this:
+non-JSON store values (Dates, Maps, class instances, functions, `NaN`) are rejected
+before persisting, with a path-pointed error. The check is on outside production; set
+`validateStoreJson: false` to disable it (or `NODE_ENV=production`, where it is off by
+default).
 
-```ts
-fx.flow("status", [set("started", true), (ctx) => send(`Chat ${ctx.chatId} is active.`)]);
-```
+The store is untyped by default. For opt-in compile-time checks on store keys and
+value types, see [Typed Stores](/docs/typed-stores) — and note that store keys are
+never proven to be _present_ (reads are `T | undefined`; guard them).
 
-## Branching
+## Safe Versioning Patterns
 
-```ts
-const flow = fx.flow("branching", [
-  prompt.text("Type yes or no.", { store: "answer" }),
-  branch(
-    (ctx) => String(ctx.store.answer).toLowerCase() === "yes",
-    send("You chose yes."),
-    send("You chose something else."),
-  ),
-]);
-```
+- Safe: change copy in `send(...)` or prompt labels without changing structure.
+- Usually safe: append new steps after a point where no old flow can currently wait.
+- Risky: insert, remove, or reorder steps before active prompts or timers.
+- Safer deploy: register a new explicit `version` and choose a `versionMismatch` policy.
 
-If the condition throws and you provide an error arm, Fluxgram runs that error arm. Otherwise the error is routed through the flow error handler.
+The core rule: if a conversation may be waiting inside a flow, treat its tree shape as persisted data.

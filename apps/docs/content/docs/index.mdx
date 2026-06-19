@@ -3,57 +3,69 @@ title: Introduction
 description: Durable, resumable Telegram bot flows for Bun and TypeScript.
 ---
 
-Fluxgram is a TypeScript library for building Telegram bots as durable flow trees. It sits on top of grammY and gives you primitives for prompts, buttons, media, timers, branching, subflows, continuations, runtime events, storage, testing, and observability.
+Telegram update handlers are easy until the conversation has memory. A command asks a question, the answer arrives in a later update, a button branches the path, a timer wakes tomorrow, and a deploy happens in the middle. The hidden state becomes the hardest part of the bot.
 
-## What Problem Fluxgram Solves
+Fluxgram makes that state explicit. You describe the conversation as a durable flow tree; Fluxgram stores where each chat is in that tree and resumes from the stored path when the next update, timer, or event arrives.
 
-Telegram bots often start as simple command handlers and quickly become state machines: ask a question, wait for an answer, validate it, branch, show buttons, sleep until later, resume after a deploy, and clean up after blocked chats. Fluxgram makes that state machine explicit.
+```ts
+import { btn, Fluxgram, MemoryStorage, prompt, send, set } from "fluxgram";
 
-## The Mental Model
+const fx = new Fluxgram(bot, { storage: new MemoryStorage() });
 
-A flow is a named tree of step descriptors. Fluxgram persists where each chat is inside the tree, stores prompt waiters and timer wakeups, then resumes from the stored path when a reply, button click, timer, sweep, or external event arrives.
+fx.command(
+  "start",
+  fx.flow("onboarding", [
+    send("Let's set up your profile."),
+    prompt.text("What should I call you?", { store: "name" }),
+    prompt.buttons("Pick a role.", {
+      buttons: [btn("Builder", set("role", "builder")), btn("Operator", set("role", "operator"))],
+    }),
+    (ctx) => send(`Ready, ${ctx.store.name}. Your role is ${ctx.store.role}.`),
+  ]),
+);
+```
 
-## Why Developers Use It
-
-- Durable prompts and timers instead of ad-hoc session state.
-- Per-chat queueing so same-chat updates run in order.
-- Reusable flow composition through subflows and continuations.
-- Production storage adapters for SQLite, Postgres, MongoDB, and Redis.
-- Cross-process events for cron jobs, web backends, and admin tooling.
-- Observability sinks, including Telegram debug chat digests.
-- A network-free test harness for conversation flows.
-
-<Cards>
-  <Card
-    title="Why Fluxgram"
-    href="/docs/why-fluxgram"
-    description="Understand the library's purpose, fit, and tradeoffs."
-  />
-  <Card
-    title="Getting Started"
-    href="/docs/getting-started"
-    description="Install Fluxgram and build your first flow."
-  />
-  <Card
-    title="Debug Chat"
-    href="/docs/debug-chat"
-    description="Send flow execution digests to a Telegram debug channel."
-  />
-  <Card
-    title="Testing"
-    href="/docs/testing"
-    description="Test flows without a Telegram network connection."
-  />
-</Cards>
+The flow above is not a callback chain hidden in session state. It is a tree of steps. When the text prompt waits, Fluxgram persists that waiting point. When the button is clicked, Fluxgram runs the button step and continues. If the process restarts between updates and you use durable storage, the same path resumes.
 
 ## What Fluxgram Handles
 
-- Per-chat execution serialization, so same-chat work runs in order.
-- Durable prompt waiters and timer states through the storage adapter.
-- Flow version mismatch policies for deploys that change a running flow shape.
-- Message chunking and parse-mode fallback for Telegram send limits.
-- Commands, message triggers, middleware, group lifecycle hooks, and programmatic flow starts.
+- Durable prompts, buttons, multi-select input, and timers.
+- Per-chat queueing so same-chat work runs in order while other chats keep moving.
+- Flow shape/version policies for deploys that touch active conversations.
+- Storage adapters for Memory, SQLite, Postgres, MongoDB, and Redis.
+- Runtime operations: active-flow inspection, cleanup, broadcasts, events, and debug digests.
+- Network-free testing through the bundled harness.
+
+## Start Here
+
+<Cards>
+  <Card
+    title="Getting Started"
+    href="/docs/getting-started"
+    description="Build the first successful bot and see how a prompt resumes."
+  />
+  <Card
+    title="Flows"
+    href="/docs/flows"
+    description="Learn durable flow trees, paths, dynamic steps, store, and versioning."
+  />
+  <Card
+    title="Prompts"
+    href="/docs/prompts"
+    description="Choose text, message, button, or multi-select prompts by user intent."
+  />
+  <Card
+    title="Runtime"
+    href="/docs/runtime"
+    description="Understand routing, prompt priority, queueing, lifecycle, and middleware."
+  />
+  <Card
+    title="Operations"
+    href="/docs/ops"
+    description="Use active-flow inspection, handles, cleanup, broadcast, and debug sinks."
+  />
+</Cards>
 
 ## What You Still Own
 
-Fluxgram does not hide Telegram from you. You still create the grammY bot, choose storage, decide command names, configure permissions, deploy the process, and design your flow text and UX.
+Fluxgram does not hide Telegram. You still create the grammY bot, choose storage, define command names, write copy, decide permissions, and operate the process. Fluxgram gives those decisions a durable workflow runtime.

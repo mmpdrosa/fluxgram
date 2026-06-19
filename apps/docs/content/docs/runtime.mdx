@@ -1,9 +1,9 @@
 ---
 title: Runtime
-description: Commands, message triggers, middleware, queueing, hooks, and client events.
+description: Commands, message triggers, middleware, queueing, lifecycle, and operations hooks.
 ---
 
-`Fluxgram` is the grammY-facing runtime. It registers flows, wires update handlers, and delegates execution to the engine.
+`Fluxgram` is the grammY-facing runtime. It registers flows, wires Telegram updates into the engine, and owns the rules for routing, queueing, lifecycle, and active-flow administration.
 
 ```ts
 const fx = new Fluxgram(bot, {
@@ -12,7 +12,19 @@ const fx = new Fluxgram(bot, {
 });
 ```
 
-## Commands And Cancellation
+## Update Flow
+
+Incoming messages move through these checks in order:
+
+1. Group migration service messages are recorded for outbound chat-id sanitization and active-flow alias lookup.
+2. `cancelCommand` and `overrideActive` commands pre-empt active prompts.
+3. Waiting prompts get priority over normal commands and `onMessage` handlers.
+4. Registered commands start their flows.
+5. Message triggers run only when no prompt handled the update.
+
+That priority keeps conversation state predictable: while a prompt waits, the next relevant message answers the prompt unless you explicitly register a reset command.
+
+## Commands And Reset Patterns
 
 ```ts
 fx.command("start", "start");
@@ -32,23 +44,23 @@ fx.onMessage({ regex: /support/i }, fx.flow("support", [send("How can we help?")
 fx.onMessage({ filter: (msg) => msg.photo !== undefined }, "photo-review");
 ```
 
-Plain message triggers run only when no flow is waiting for that chat. Waiting prompts consume messages first.
+Plain message triggers are fallback routing. They run only when no flow is waiting for that chat.
 
 ## Middleware
 
 ```ts
 fx.use(async (ctx, next) => {
-  if (ctx.chatId < 0 && ctx.scope === "command:/start") {
+  if (ctx.chatId < 0 && ctx.source === "command:/start") {
     return ctx.block();
   }
-  ctx.params.store = { source: ctx.scope };
+  ctx.params.store = { source: ctx.source };
   return next();
 });
 ```
 
-Middleware can block a start, set initial store data, or replace the flow before it starts. Scopes can target all flows, commands, messages, or programmatic starts.
+Middleware can block a start, set initial store data, or replace the flow before it starts. Sources can target all flows, commands, messages, or programmatic starts.
 
-## Queueing
+## Per-Chat Queueing
 
 Fluxgram serializes execution per chat and allows different chats to run concurrently. This prevents double-click and waiter cleanup races while keeping independent chats responsive.
 
@@ -63,9 +75,9 @@ await fx.start();
 await fx.stop();
 ```
 
-`start()` calls `init()`, starts the recovery sweep interval, and starts grammY long polling. Use `init()` directly when another server routes updates and you need Fluxgram ready before handling them.
+`start()` calls `init()`, starts the recovery sweep interval, and starts grammY long polling. Use `init()` directly when another server routes updates and you need Fluxgram ready before handling them; see [Webhook Deployments](/docs/webhooks) for the full webhook pattern.
 
-## Active Flows
+## Active Flow Inspection
 
 ```ts
 const active = await fx.listActive({ chatId });
@@ -73,18 +85,9 @@ const handle = active[0] ? await fx.getFlowHandle(active[0].id) : null;
 await fx.gcFlows(active.map((item) => item.id));
 ```
 
-Use active flow inspection for admin tools, support dashboards, cleanup jobs, and cancel/reset behavior that is more specific than `cancelCommand`.
+Use active flow inspection for admin tools, support dashboards, cleanup jobs, and cancel/reset behavior that is more specific than `cancelCommand`. Chat-scoped inspection follows known group migration aliases, so querying the current supergroup id also finds flows that started before migration.
 
-## Broadcasts
-
-```ts
-const result = await fx.broadcast(chatIds, "Maintenance starts in 10 minutes.", {
-  parseMode: "HTML",
-  onProgress: (done, total) => console.log(`${done}/${total}`),
-});
-```
-
-`broadcast` sends through the same throttled API path as flow messages. Dead chats are reported separately and their active flow states are cleaned up.
+See [Operations](/docs/ops) for copyable active-flow, handle, cleanup, broadcast, `DebugChatSink`, and `FluxgramClient` patterns.
 
 ## Group Lifecycle
 
@@ -95,7 +98,7 @@ fx.onLostAdmin("admin-lost");
 fx.onGroupMigrated("group-migrated");
 ```
 
-Fluxgram also tracks group-to-supergroup migrations. `sanitizeChatId` resolves current chat ids, and `getOriginalChatId` can map a migrated supergroup id back to the original id when known.
+Fluxgram tracks group-to-supergroup migrations. `sanitizeChatId` resolves current chat ids, and `getOriginalChatId` can map a migrated supergroup id back to the original id when known.
 
 ## Hooks And Client Events
 

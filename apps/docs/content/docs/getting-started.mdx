@@ -3,6 +3,8 @@ title: Getting Started
 description: Install Fluxgram, create a grammY bot, and register your first durable flow.
 ---
 
+This guide builds a small bot that asks for a name, waits for the next message, stores the answer, and resumes the flow.
+
 ## Install
 
 ```sh
@@ -21,33 +23,41 @@ await bot.init();
 const fx = new Fluxgram(bot, {
   storage: new MemoryStorage(),
 });
+```
 
-const start = fx.flow("start", [
-  send("Welcome. I will remember where you are in this flow."),
-  prompt.text("What should I call you?", { store: "name" }),
-  (ctx) => send(`Nice to meet you, ${ctx.store.name}.`),
-]);
+`bot.init()` gives Fluxgram the bot identity it uses to namespace durable state. `MemoryStorage` is fine for local development and tests; use durable storage before production.
 
-fx.command("start", start);
+## Register The First Flow
 
+```ts
+fx.command(
+  "start",
+  fx.flow("start", [
+    send("Welcome. I can remember where you are in this conversation."),
+    prompt.text("What should I call you?", { store: "name" }),
+    (ctx) => send(`Nice to meet you, ${ctx.store.name}.`),
+  ]),
+);
+```
+
+The command starts a named flow. The text prompt sends a message and stores a waiter. The dynamic final step runs only after the user replies.
+
+## Run The Bot
+
+```ts
 await fx.start();
 ```
 
-## Initialize Before Constructing Fluxgram
+`start()` calls `init()`, starts recovery sweeps, and starts grammY long polling. If you deploy behind webhooks instead, call `await fx.init()` before routing updates and schedule `await fx.sweep()` yourself.
 
-Fluxgram needs the bot identity to namespace durable flow state. Call `await bot.init()` before `new Fluxgram(bot, ...)`, or construct the grammY bot with known `botInfo`.
+## What Happened At Runtime
 
-## Memory Storage Is For Local Development
+1. `/start` matched the command and created a flow state for the chat.
+2. `send(...)` posted the welcome message.
+3. `prompt.text(...)` posted the question, persisted the waiting path, and stopped the flow.
+4. The user's next text message claimed the waiter, stored `ctx.store.name`, and continued from the next step.
 
-`MemoryStorage` is useful for local development and tests. Use a durable adapter for production so prompts, timers, and migration metadata survive restarts.
-
-## What Happens At Runtime
-
-`/start` starts the named flow. The text prompt stores a waiter. The next message from the chat claims that waiter, validates or stores the answer, and resumes the flow from the next step.
-
-## Important Runtime Rules
-
-Commands and message triggers run through the same per-chat engine queue as flows. While a prompt is waiting, incoming messages in that chat are treated as the prompt answer before command or `onMessage` routing, except commands registered with `overrideActive`.
+While a prompt is waiting, messages in that chat answer the prompt before normal command or message-trigger routing. Use `overrideActive` or `cancelCommand` for reset commands.
 
 ```ts
 fx.command("cancel", fx.flow("cancel", [send("Cancelled.")]), {
@@ -55,4 +65,9 @@ fx.command("cancel", fx.flow("cancel", [send("Cancelled.")]), {
 });
 ```
 
-Use `overrideActive` for commands that should interrupt a waiting flow, such as `/cancel`, `/clear`, or a main menu reset.
+## Next Steps
+
+- [Storage](/docs/storage): choose durable storage for production.
+- [Testing](/docs/testing): test flows without hitting Telegram.
+- [Production](/docs/production): configure sweeps, versions, throttling, and shutdown.
+- [Prompts](/docs/prompts): choose the right prompt for text, attachments, buttons, and groups.

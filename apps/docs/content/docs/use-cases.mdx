@@ -5,24 +5,48 @@ description: Practical bot workflows that fit Fluxgram's durable flow model.
 
 ## Multi-Step Onboarding
 
-Collect profile fields, validate each answer, branch based on account type, and resume after a restart without losing the user's place.
+Problem: onboarding usually asks for several fields, validates answers, and branches based on user type. Plain handlers often spread that state across sessions and callbacks.
+
+Fluxgram shape: one flow with text prompts, validation, buttons, and a final dynamic step that reads `ctx.store`.
+
+```ts
+fx.flow("onboard", [
+  prompt.text("Name?", { store: "name" }),
+  prompt.buttons("Plan?", { buttons: [btn("Team", set("plan", "team"))] }),
+  (ctx) => send(`Welcome ${ctx.store.name}.`),
+]);
+```
 
 ## Support Triage
 
-Ask for category, urgency, screenshots, and contact details. Use buttons for structured choices and message prompts for attachments.
+Problem: support triage needs category, urgency, screenshots, and contact details. Users may disappear and return later.
+
+Fluxgram shape: combine buttons for structured choices, `prompt.message` for attachments, and validation for contact data. Support triage is a durable flow, not a pile of temporary session flags.
 
 ## Reminder And Follow-Up Bots
 
-Use `sleep` or `waitFor` to pause work durably and send follow-ups later.
+Problem: reminders and follow-ups need to pause for minutes, hours, or days without holding memory in the process.
+
+Fluxgram shape: use `sleep`, `humanSleep`, or `waitFor`; sweeps resume due timers from durable storage.
+
+```ts
+fx.flow("follow-up", [send("I will check back later."), sleep(3600), send("Checking back in.")]);
+```
 
 ## Group Administration
 
-Run setup flows when the bot is added to a group, becomes admin, loses admin, or the group migrates to a supergroup.
+Problem: group bots need setup flows, admin-loss handling, migration tracking, and reset commands that do not strand old prompts.
+
+Fluxgram shape: use group lifecycle hooks, `overrideActive` reset commands, and migration-aware active-flow inspection.
 
 ## Internal Operations Bots
 
-Start flows from cron jobs or backend processes with `FluxgramClient`, send cross-process messages, and serialize event handling by key.
+Problem: cron jobs and backend services need to start flows, send messages, and avoid double-running retried work.
+
+Fluxgram shape: publish work through `FluxgramClient`, use `uniqueKey` for idempotency, and use `oneAtATimeKey` when events for the same resource must serialize.
 
 ## Moderation And Review Tools
 
-Forward source messages, collect reviewer decisions with buttons, pin relevant messages, and send debug digests to an operator chat.
+Problem: reviewers need source context, structured decisions, and an audit-friendly path through a case.
+
+Fluxgram shape: forward source messages, collect reviewer choices with buttons, store decisions, pin relevant messages, and send debug digests to an operator chat.

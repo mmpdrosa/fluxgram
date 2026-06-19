@@ -1,10 +1,12 @@
 import { normalize, type Step, type StepLike } from "../steps";
 
-export interface FlowDef {
+export interface FlowDef<S = unknown> {
   name: string;
   version: number;
   root: Step;
   treeHash: string;
+  /** phantom: carries the flow's store shape for typed initiateFlow/command (never set at runtime) */
+  readonly __store?: S;
 }
 
 /** Children slots of a node, indexable by path segment. */
@@ -60,7 +62,11 @@ function fnv1a(s: string): number {
 export class FlowRegistry {
   private flows = new Map<string, FlowDef>();
 
-  register(name: string, root: StepLike, opts?: { version?: number }): FlowDef {
+  register<S = Record<string, unknown>>(
+    name: string,
+    root: StepLike,
+    opts?: { version?: number },
+  ): FlowDef<S> {
     if (this.flows.has(name)) {
       throw new Error(`Flow '${name}' is already registered`);
     }
@@ -72,7 +78,7 @@ export class FlowRegistry {
       treeHash: structuralHash(normalized),
     };
     this.flows.set(name, def);
-    return def;
+    return def as FlowDef<S>;
   }
 
   get(name: string): FlowDef | undefined {

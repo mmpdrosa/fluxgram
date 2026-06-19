@@ -12,6 +12,7 @@ import {
 import { FlowRegistry, type FlowDef } from "./engine/registry";
 import type { StorageAdapter } from "./storage/adapter";
 import type { StepLike } from "./steps";
+import type { FlowSpec } from "./steps/typed";
 import { createSanitizeChat } from "./transformers/sanitize-chat";
 import { createThrottle, type ThrottleOptions } from "./transformers/throttle";
 import {
@@ -36,6 +37,8 @@ export interface FluxgramOptions {
   throttle?: boolean | ThrottleOptions;
   /** wide-event consumers: evlogSink(), DebugChatSink, jsonSink(), custom */
   sinks?: ObservabilitySink[];
+  /** reject non-JSON store values before persisting (default: on unless NODE_ENV=production) */
+  validateStoreJson?: boolean;
   maxQueuedPerChat?: number;
   timerThresholdSecs?: number;
   runningGraceMs?: number;
@@ -137,6 +140,9 @@ export class Fluxgram {
         ? {}
         : { interChunkDelayMs: opts.interChunkDelayMs }),
       ...(opts.sinks === undefined ? {} : { sinks: opts.sinks }),
+      ...(opts.validateStoreJson === undefined
+        ? {}
+        : { validateStoreJson: opts.validateStoreJson }),
       ...(opts.maxQueuedPerChat === undefined ? {} : { maxQueuedPerChat: opts.maxQueuedPerChat }),
       ...(opts.doneRetentionMs === undefined ? {} : { doneRetentionMs: opts.doneRetentionMs }),
       ...(opts.now === undefined ? {} : { now: opts.now }),
@@ -176,7 +182,7 @@ export class Fluxgram {
       };
       const resolved = this.resolveChatId(chatId);
       if (clearWaiters) {
-        const actives = await this.engine.listActive({ chatId: resolved });
+        const actives = await this.listActiveForChatAliases(resolved);
         await this.engine.gcFlows(actives.filter((a) => a.status === "waiting").map((a) => a.id));
       }
       await this.api.sendMessage(
@@ -255,8 +261,21 @@ export class Fluxgram {
 
   // ---- registration API ----
 
-  flow(name: string, root: StepLike, opts?: { version?: number }): FlowDef {
-    return this.registry.register(name, root, opts);
+  flow<S extends object = Record<string, unknown>>(spec: FlowSpec<S>): FlowDef<S>;
+  flow<S extends object = Record<string, unknown>>(
+    name: string,
+    root: StepLike,
+    opts?: { version?: number },
+  ): FlowDef<S>;
+  flow(specOrName: FlowSpec | string, root?: StepLike, opts?: { version?: number }): FlowDef {
+    if (typeof specOrName === "string") {
+      return this.registry.register(specOrName, root as StepLike, opts);
+    }
+    return this.registry.register(
+      specOrName.name,
+      specOrName.root,
+      specOrName.version === undefined ? undefined : { version: specOrName.version },
+    );
   }
 
   command(name: string, flow: FlowDef | string, opts?: { overrideActive?: boolean }): void {
@@ -323,15 +342,18 @@ export class Fluxgram {
 
   // ---- runtime API ----
 
-  async initiateFlow(
-    flow: FlowDef | string,
+  async initiateFlow<S = Record<string, unknown>>(
+    flow: FlowDef<S> | string,
     chatId: number,
-    opts?: { store?: Record<string, unknown>; startMessage?: IncomingMessage },
+    opts?: {
+      store?: S extends object ? S : Record<string, unknown>;
+      startMessage?: IncomingMessage;
+    },
   ): Promise<void> {
     const def = typeof flow === "string" ? this.mustGet(flow) : flow;
     // the chain sees (and may mutate) the params that actually start the flow
     const params: { store?: Record<string, unknown>; startMessage?: IncomingMessage } = {
-      ...opts,
+      ...(opts as { store?: Record<string, unknown>; startMessage?: IncomingMessage }),
     };
     const result = await runMiddlewareChain(
       this.middleware,
@@ -357,7 +379,8 @@ export class Fluxgram {
   }
 
   async listActive(q?: { chatId?: number }): Promise<ActiveFlowInfo[]> {
-    return this.engine.listActive(q);
+    if (q?.chatId === undefined) return this.engine.listActive(q);
+    return this.listActiveForChatAliases(q.chatId);
   }
 
   async getFlowHandle(id: string): Promise<FlowHandle | null> {
@@ -397,7 +420,7 @@ export class Fluxgram {
       } catch (error) {
         if (isChatDead(error)) {
           dead.push(chatIds[i]!);
-          const actives = await this.engine.listActive({ chatId });
+          const actives = await this.listActiveForChatAliases(chatIds[i]!);
           await this.engine.gcFlows(actives.map((a) => a.id));
         } else {
           failed.push({ chatId: chatIds[i]!, error });
@@ -424,6 +447,36 @@ export class Fluxgram {
       cur = this.migrations.get(cur)!;
     }
     return cur;
+  }
+
+  private chatAliases(chatId: number): number[] {
+    const out: number[] = [];
+    const seen = new Set<number>();
+    const add = (id: number): void => {
+      if (!seen.has(id)) {
+        seen.add(id);
+        out.push(id);
+      }
+    };
+    const resolved = this.resolveChatId(chatId);
+    add(chatId);
+    add(resolved);
+    let prev = this.migrationsRev.get(resolved);
+    while (prev !== undefined && !seen.has(prev)) {
+      add(prev);
+      prev = this.migrationsRev.get(prev);
+    }
+    return out;
+  }
+
+  private async listActiveForChatAliases(chatId: number): Promise<ActiveFlowInfo[]> {
+    const byId = new Map<string, ActiveFlowInfo>();
+    for (const alias of this.chatAliases(chatId)) {
+      for (const active of await this.engine.listActive({ chatId: alias })) {
+        byId.set(active.id, active);
+      }
+    }
+    return [...byId.values()];
   }
 
   /** Engine BotApi backed by grammY's raw API (every call goes through the transformers). */
@@ -554,7 +607,7 @@ export class Fluxgram {
     if (cmd !== undefined) {
       const cancel = this.cancelCommands.get(cmd);
       if (cancel) {
-        const actives = await this.engine.listActive({ chatId: msg.chat.id });
+        const actives = await this.listActiveForChatAliases(msg.chat.id);
         await this.engine.gcFlows(actives.map((a) => a.id));
         this.fireBotHandled(msg);
         await this.api.sendMessage(
@@ -565,7 +618,7 @@ export class Fluxgram {
       }
       const entry = this.commandMap.get(cmd);
       if (entry?.overrideActive) {
-        const actives = await this.engine.listActive({ chatId: msg.chat.id });
+        const actives = await this.listActiveForChatAliases(msg.chat.id);
         await this.engine.gcFlows(actives.map((a) => a.id));
         this.fireBotHandled(msg);
         await this.startCommandFlow(entry, cmd, msg);

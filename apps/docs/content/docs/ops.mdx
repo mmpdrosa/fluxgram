@@ -1,0 +1,120 @@
+---
+title: Operations
+description: Build admin and support tools with Fluxgram runtime primitives.
+---
+
+Fluxgram does not export a one-size-fits-all ops helper. Permissions, command names, destructive-action confirmation, audit trails, and operator copy are app-owned. The runtime primitives are intentionally small and composable.
+
+## Inspect Active Flows
+
+```ts
+fx.command(
+  "active",
+  fx.flow("ops:active", [
+    async (ctx) => {
+      const active = await fx.listActive({ chatId: ctx.chatId });
+      if (active.length === 0) return send("No active conversations in this chat.");
+
+      return send(
+        active
+          .map((item) => `${item.flowName} at [${item.path.join(",")}] (${item.status})`)
+          .join("\n"),
+      );
+    },
+  ]),
+);
+```
+
+`listActive({ chatId })` follows known group migration aliases, so current supergroup ids include flows that started before migration.
+
+## Clear The Current Chat
+
+```ts
+fx.command(
+  "clear",
+  fx.flow("ops:clear", [
+    async (ctx) => {
+      const active = await fx.listActive({ chatId: ctx.chatId });
+      await fx.gcFlows(active.map((item) => item.id));
+      return send(`Cleared ${active.length} active flow(s) in this chat.`);
+    },
+  ]),
+  { overrideActive: true },
+);
+```
+
+`gcFlows(ids)` is destructive. Gate this command with your own admin checks before exposing it in groups.
+
+## Reset With overrideActive
+
+```ts
+fx.command("menu", fx.flow("main-menu", [send("Main menu.")]), {
+  overrideActive: true,
+});
+```
+
+Use `overrideActive` when a command should interrupt a waiting prompt before starting its own flow.
+
+## Inspect A Flow Handle
+
+```ts
+fx.command(
+  "handle",
+  fx.flow("ops:handle", [
+    async (ctx) => {
+      const [first] = await fx.listActive({ chatId: ctx.chatId });
+      if (!first) return send("No active flow handle to inspect.");
+
+      const handle = await fx.getFlowHandle(first.id);
+      if (!handle) return send(`Flow ${first.id} no longer has a handle.`);
+
+      return send(`Handle ${handle.id}: ${handle.flowName} for chat ${handle.chatId}.`);
+    },
+  ]),
+);
+```
+
+`getFlowHandle(id)` can edit prompt text, edit button labels, or terminate the flow. Keep handle operations scoped to trusted operators.
+
+## Broadcast
+
+```ts
+const result = await fx.broadcast(chatIds, "Maintenance starts in 10 minutes.", {
+  onProgress: (done, total) => console.log(`${done}/${total}`),
+});
+```
+
+`broadcast` uses Fluxgram's throttled API path. Dead chats are reported separately and their active flow states are cleaned up.
+
+## DebugChatSink
+
+```ts
+const fx = new Fluxgram(bot, {
+  storage,
+  sinks: [new DebugChatSink(bot.api, { chatId: Number(Bun.env.DEBUG_CHAT_ID) })],
+});
+```
+
+`DebugChatSink` sends flow execution digests to an operator chat. Use it for support visibility and incident debugging, not for end-user messaging.
+
+## FluxgramClient
+
+```ts
+const client = new FluxgramClient({ events });
+
+await client.sendMessage(chatId, "Report ready.", {
+  uniqueKey: `report:${reportId}`,
+});
+```
+
+`FluxgramClient` lets backend jobs and cron processes send messages or initiate flows through the event bus. Use `uniqueKey` for externally retried work and `oneAtATimeKey` when jobs for the same resource must serialize.
+
+## Permission Guidance
+
+Ops commands should be boring and explicit:
+
+- check the Telegram user or chat before destructive actions;
+- prefer chat-scoped operations over global cleanup commands;
+- confirm broad broadcasts outside the bot flow if they affect many users;
+- avoid exposing internal flow ids to untrusted users;
+- log operator actions through your normal app audit path or observability sinks.

@@ -7,7 +7,7 @@ description: Production choices for durable storage, recovery, deploys, throttli
 
 - Use durable storage instead of `MemoryStorage`.
 - Call `await bot.init()` before constructing `Fluxgram` unless `botInfo` is already known.
-- Call `await fx.start()` for long polling, or `await fx.init()` before routing webhook updates.
+- Call `await fx.start()` for long polling, or follow the [Webhook Deployments](/docs/webhooks) lifecycle before routing webhook updates.
 - Configure `timerThresholdSecs` for the shortest delay that must survive restarts.
 - Keep `sweepIntervalMs` low enough for timer latency and high enough for storage load.
 - Use explicit flow versions when changing flow shape while conversations may be active.

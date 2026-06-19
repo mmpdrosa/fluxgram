@@ -1,0 +1,57 @@
+---
+title: Webhook Deployments
+description: Run Fluxgram behind a webhook server while preserving durable timers and recovery sweeps.
+---
+
+Webhook deployments are useful when your platform already receives Telegram updates over HTTP or when you do not want long polling. Use `fx.start()` for long polling. Use `fx.init()` plus your own update routing for webhooks.
+
+## Minimal Lifecycle
+
+```ts
+import { Bot, webhookCallback } from "grammy";
+import { Fluxgram, send } from "fluxgram";
+
+const bot = new Bot(Bun.env.BOT_TOKEN!);
+await bot.init();
+
+const fx = new Fluxgram(bot, { storage });
+fx.command("start", fx.flow("start", [send("Ready.")]));
+
+await fx.init();
+
+const handleUpdate = webhookCallback(bot, "std/http");
+const sweepTimer = setInterval(() => void fx.sweep(), 30_000);
+
+Bun.serve({
+  async fetch(request) {
+    return handleUpdate(request);
+  },
+});
+
+process.on("SIGTERM", () => {
+  clearInterval(sweepTimer);
+  void fx.stop().finally(() => process.exit(0));
+});
+```
+
+Register flows, commands, middleware, events, and hooks before accepting webhook traffic. `fx.init()` must complete before the first update is routed to grammY so migrations and persisted recovery state are loaded.
+
+## Sweeps
+
+`fx.start()` starts periodic sweeps for long polling. Webhook servers must schedule `fx.sweep()` themselves.
+
+Sweeps recover:
+
+- due durable timers from `sleep`, `humanSleep`, and `waitFor`;
+- stale running docs left by a crashed process;
+- waiting docs whose prompt send was interrupted before the waiter became usable.
+
+Choose a sweep interval that matches your timer latency target without overloading storage. A common starting point is 30 seconds.
+
+## Operations
+
+Multiple bot processes can share durable storage when the adapter provides atomic waiter claiming and compare-and-swap writes. Keep all processes on compatible flow definitions and use explicit flow versions during deploys that change long-running conversations.
+
+External job runners and webhook providers may retry requests. Use event `uniqueKey` values for jobs that must be idempotent across retries, and use `oneAtATimeKey` when events for the same resource must run serially.
+
+Do not call `fx.start()` in the same process that routes webhook updates. `start()` begins long polling, while webhook servers should route HTTP updates through the grammY bot and own their sweep timer.

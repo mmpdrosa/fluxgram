@@ -9,6 +9,7 @@ import {
 import { isChatDead, ValidationError } from "../errors";
 import { humanDelay } from "../util/humandelay";
 import { splitText } from "../util/chunk";
+import { assertJsonSafe } from "../util/jsonsafe";
 import { CycleRecorder, type FlowTrigger, type ObservabilitySink } from "../observability/events";
 import type { StorageAdapter } from "../storage/adapter";
 import type { FlowStateDoc, Frame } from "./state";
@@ -25,8 +26,8 @@ class JumpSignal {}
 
 /**
  * Minimal Bot API surface the engine needs. In production this is satisfied by a
- * grammY Api (wired in a later phase); the test harness provides a fake.
- * SPEC: §2 — grammY owns transport; the engine depends only on this interface.
+ * grammY Api; the test harness provides a fake.
+ * grammY owns transport; the engine depends only on this interface.
  */
 export interface SentMessageLike {
   message_id: number;
@@ -109,12 +110,22 @@ export interface IncomingMessage {
   [k: string]: unknown;
 }
 
+export interface CtxSendOpts {
+  parseMode?: string;
+  replyToMessageId?: number;
+  disableWebPagePreview?: boolean;
+}
+
 export interface FlowContext<S = Record<string, unknown>> {
   store: S extends Record<string, unknown> ? S : Record<string, unknown>;
   chatId: number;
   api: BotApi;
   message?: IncomingMessage;
   botMessage?: object;
+  /** Send a message to this flow's chat (chat-bound convenience over api.sendMessage). */
+  send(text: string, opts?: CtxSendOpts): Promise<SentMessageLike>;
+  /** Edit a message in this flow's chat; throws if the underlying api cannot edit. */
+  editMessage(messageId: number, text: string, opts?: { parseMode?: string }): Promise<void>;
   /** append a debug action to this cycle's wide event (and the debug chat, if configured) */
   debug(
     msg: string,
@@ -135,7 +146,7 @@ export interface FlowErrorContext {
 
 export type FlowErrorHandler = (e: FlowErrorContext) => unknown | Promise<unknown>; // may return a StepLike to run as recovery
 
-/** What to do with an in-flight conversation whose flow version/shape changed (§4.2). */
+/** What to do with an in-flight conversation whose flow version/shape changed. */
 export type VersionMismatchPolicy =
   | "restart"
   | "drop"
@@ -162,6 +173,8 @@ export interface EngineOptions {
   doneRetentionMs?: number;
   /** wide-event consumers: evlogSink(), DebugChatSink, jsonSink(), custom */
   sinks?: ObservabilitySink[];
+  /** reject non-JSON store values before persisting (default: on unless NODE_ENV=production) */
+  validateStoreJson?: boolean;
   now?: () => number;
   sleepFn?: (ms: number) => Promise<void>;
 }
@@ -189,6 +202,7 @@ export interface FlowHandle {
 }
 
 const DEFAULT_REQUIRE_BUTTON_TEXT = "Please click one of the buttons to answer.";
+const DEFAULT_REQUIRE_TEXT_TEXT = "Please send a text message to answer.";
 
 export class Engine {
   private botId: number;
@@ -203,6 +217,7 @@ export class Engine {
   private interChunkDelayMs: number;
   private doneRetentionMs: number;
   private sinks: ObservabilitySink[];
+  private validateStoreJson: boolean;
   private now: () => number;
   private sleepFn: (ms: number) => Promise<void>;
 
@@ -221,6 +236,7 @@ export class Engine {
     this.interChunkDelayMs = opts.interChunkDelayMs ?? 1000;
     this.doneRetentionMs = opts.doneRetentionMs ?? 3_600_000;
     this.sinks = opts.sinks ?? [];
+    this.validateStoreJson = opts.validateStoreJson ?? process.env["NODE_ENV"] !== "production";
     this.now = opts.now ?? (() => Date.now());
     this.sleepFn = opts.sleepFn ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
@@ -263,6 +279,29 @@ export class Engine {
       store: doc.store,
       chatId: doc.chatId,
       api,
+      send: (text, opts) => {
+        const payload: Record<string, unknown> = {};
+        if (opts?.parseMode !== undefined) payload["parse_mode"] = opts.parseMode;
+        if (opts?.replyToMessageId !== undefined)
+          payload["reply_to_message_id"] = opts.replyToMessageId;
+        if (opts?.disableWebPagePreview) payload["disable_web_page_preview"] = true;
+        return api.sendMessage(
+          doc.chatId,
+          text,
+          Object.keys(payload).length > 0 ? payload : undefined,
+        );
+      },
+      editMessage: async (messageId, text, opts) => {
+        if (!api.editMessageText) {
+          throw new Error("ctx.editMessage: the configured BotApi cannot edit messages");
+        }
+        await api.editMessageText(
+          doc.chatId,
+          messageId,
+          text,
+          opts?.parseMode === undefined ? undefined : { parse_mode: opts.parseMode },
+        );
+      },
       debug: (msg, opts) => cycle?.add({ kind: "debug", text: msg, ...opts }),
       debugException: (msg, error, opts) =>
         cycle?.add({
@@ -381,6 +420,14 @@ export class Engine {
         if (node.kind === "multiselect" || node.mode === "buttons") {
           // buttons-only: bounce and keep waiting
           await ctx.api.sendMessage(chatId, node.requireButtonText ?? DEFAULT_REQUIRE_BUTTON_TEXT);
+          await this.storage.putWaiter(`chat:${chatId}`, doc.id);
+          await this.persist(doc);
+          return;
+        }
+
+        if (node.mode === "text" && message.text === undefined) {
+          cycle.add({ kind: "validation-failed", text: DEFAULT_REQUIRE_TEXT_TEXT });
+          await ctx.api.sendMessage(chatId, DEFAULT_REQUIRE_TEXT_TEXT);
           await this.storage.putWaiter(`chat:${chatId}`, doc.id);
           await this.persist(doc);
           return;
@@ -591,7 +638,7 @@ export class Engine {
     if (opts?.queryId) await ctx.api.answerCallbackQuery?.(opts.queryId, { text: node.submitText });
 
     if (selected.length === 0 && node.emptySelectionText !== undefined) {
-      // SPEC §5.2: empty submit announces emptySelectionText, stores [], continues
+      // empty submit announces emptySelectionText, stores [], continues
       await ctx.api.sendMessage(doc.chatId, node.emptySelectionText);
     }
     doc.store[node.store] = structuredClone(selected);
@@ -628,12 +675,15 @@ export class Engine {
   }
 
   /**
-   * Persist the doc as the program counter / store change (write-through, §4.4).
+   * Persist the doc as the program counter / store change (write-through).
    * rev 0 = never written (plain insert); after that every write is a CAS on
    * rev, so a concurrent writer (another bot process resuming the same
    * conversation) is detected instead of silently clobbered.
    */
   private async persist(doc: FlowStateDoc): Promise<void> {
+    if (this.validateStoreJson) {
+      assertJsonSafe(doc.store, "store");
+    }
     doc.meta.updatedAt = this.now();
     if (doc.rev === 0) {
       doc.rev = 1;
@@ -793,7 +843,7 @@ export class Engine {
   }
 
   /**
-   * §4.2: apply the version-mismatch policy when the registered flow no longer
+   * Apply the version-mismatch policy when the registered flow no longer
    * matches the suspended doc. Returns "consumed" when the doc was handled
    * (restarted or dropped) and the caller must not resume it.
    */
@@ -843,7 +893,7 @@ export class Engine {
   }
 
   /**
-   * Recovery sweep (§4.4): wake due timers, resume crashed 'running' docs, and
+   * Recovery sweep: wake due timers, resume crashed 'running' docs, and
    * re-send prompts that never made it out. Call on start() and periodically.
    */
   async sweep(): Promise<void> {
@@ -938,7 +988,7 @@ export class Engine {
         await this.drive(def, doc, ctx, () => this.continueAfter(nodes, doc, ctx));
       } else {
         // re-run the node in flight (waitFor re-check, prompt re-send, crashed step retry).
-        // At-least-once: the step may repeat side effects (§4.4).
+        // At-least-once: the step may repeat side effects.
         await this.drive(def, doc, ctx, () =>
           this.continueAfter(nodes, doc, ctx, { node, path: doc.path }),
         );
@@ -1043,7 +1093,7 @@ export class Engine {
 
   /**
    * Resolve doc.path into effective nodes, expanding dynamic steps by re-invoking
-   * them (§4.1 contract). nodes[i] is the node at doc.path.slice(0, i).
+   * them. nodes[i] is the node at doc.path.slice(0, i).
    */
   private async materialize(def: FlowDef, doc: FlowStateDoc, ctx: FlowContext): Promise<Step[]> {
     let cur = await this.expandDynamic(def.root, [], doc, ctx, "resume");
@@ -1065,7 +1115,7 @@ export class Engine {
   /**
    * Replace a dynamic node by its returned subtree, grafted at the same path.
    * On resume, the subtree's structural hash must match the one recorded at
-   * suspend time — the determinism contract of §4.1.
+   * suspend time; this is the dynamic-step determinism contract.
    */
   private async expandDynamic(
     node: Step,
@@ -1372,7 +1422,7 @@ export class Engine {
   }
 
   /**
-   * Suspend ordering per §4.4: persist waiting state, register waiters, THEN send
+   * Suspend ordering: persist waiting state, register waiters, THEN send
    * the prompt message, then record its id. A crash between any two leaves a
    * recoverable doc, never a stuck user.
    */

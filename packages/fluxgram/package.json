@@ -1,6 +1,6 @@
 {
   "name": "fluxgram",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Durable, resumable Telegram bot flows for Bun/TypeScript",
   "keywords": [
     "bot",
@@ -70,7 +70,8 @@
     "lint": "oxlint src testing tests",
     "format": "oxfmt src testing tests",
     "format:check": "oxfmt --check src testing tests",
-    "smoke:node": "node tests/node-smoke.mjs"
+    "smoke:node": "node tests/node-smoke.mjs",
+    "smoke:bun-dist": "bun tests/bun-dist-smoke.mjs"
   },
   "dependencies": {
     "evlog": "^2.18.1",

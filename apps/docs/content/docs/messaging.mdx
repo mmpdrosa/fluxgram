@@ -33,6 +33,51 @@ send("<b>Important</b>", {
 
 Use `onSent` when later steps need to edit, pin, unpin, or forward a message by id.
 
+## Edit A Sent Message Later
+
+Store the message id with `onSent`, wait or do work, then edit that same Telegram message through `ctx.api`.
+
+```ts
+fx.flow("status", [
+  send("Status: queued", {
+    onSent: (ctx, message) => {
+      ctx.store.statusMessageId = message.message_id;
+    },
+  }),
+  sleep(10),
+  async (ctx) => {
+    const messageId = Number(ctx.store.statusMessageId);
+    await ctx.api.editMessageText?.(ctx.chatId, messageId, "Status: still working...");
+  },
+  sleep(10),
+  async (ctx) => {
+    const messageId = Number(ctx.store.statusMessageId);
+    await ctx.api.editMessageText?.(ctx.chatId, messageId, "Status: done");
+  },
+]);
+```
+
+This pattern is useful for countdowns, changing status messages, and removing stale details from a message after a delay. For long delays, configure durable storage so the stored message id and timer survive restarts.
+
+With a [typed store](/docs/typed-stores), `k.send` types the `onSent` callback and
+offers a `storeMessageId` shortcut, so the id is written under a number-typed key and
+later reads are `number | undefined` (guard them):
+
+```ts
+k.send("Status: queued", { storeMessageId: "statusMessageId" });
+```
+
+Inside a dynamic step, `ctx.send(text, opts?)` and `ctx.editMessage(messageId, text, opts?)` are chat-bound convenience methods over the raw API — no `ctx.chatId` threading and no optional-chaining on `ctx.api`. `ctx.editMessage` throws a clear error if the configured API cannot edit. Use raw `ctx.api` for anything they do not cover.
+
+```ts
+async (ctx) => {
+  const msg = await ctx.send("Working…");
+  await ctx.editMessage(msg.message_id, "Done.");
+};
+```
+
+Telegram still controls what can be edited. Some messages cannot be edited after enough time has passed, and messages with buttons may need a full `editMessageText` call that includes the markup you want to keep.
+
 ## Parse-Mode Fallback
 
 ```ts

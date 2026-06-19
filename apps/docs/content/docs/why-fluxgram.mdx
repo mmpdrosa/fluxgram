@@ -1,30 +1,36 @@
 ---
 title: Why Fluxgram
-description: Why Fluxgram exists and when it is the right tool for a Telegram bot.
+description: Decide when Fluxgram is the right tool for a Telegram bot.
 ---
 
-## Purpose
-
-Fluxgram is for bots where a conversation spans more than one update. It gives you a durable execution model for workflows that ask questions, wait, branch, retry, sleep, and resume after a restart.
+Use Fluxgram when your bot has conversation state that should be visible, durable, and recoverable. Use plain grammY when an update can be handled completely in one function.
 
 ## Use Fluxgram When
 
-- You need multi-step conversations with prompts and validation.
-- You need timers or reminders that survive process restarts.
-- You want one chat's updates serialized without blocking other chats.
-- You need to start flows from commands, messages, cron jobs, web backends, or admin tools.
-- You want observable flow execution instead of scattered log lines.
+- A conversation spans updates: ask a question, wait, validate, branch, and continue.
+- The bot needs durability: prompts, timers, and flow state should survive restarts.
+- You need timers or polling with `sleep`, `humanSleep`, or `waitFor`.
+- Operators need visibility: list active flows, clear stuck chats, inspect handles, or send debug digests.
+- Work starts outside Telegram: cron jobs, webhooks, backend services, or admin tools emit events through `FluxgramClient`.
 
 ## Use Plain grammY When
 
-- Your bot only responds to simple stateless commands.
-- You do not need durable prompts, timers, or flow recovery.
-- You want full manual control over every update handler and storage record.
+- Commands are stateless and finish inside one update handler.
+- You do not need durable prompts, timers, external starts, or recovery sweeps.
+- You want to design every storage record and concurrency rule yourself.
 
-## How It Fits With grammY
+## The Core Tradeoff
 
-You still use grammY for the bot process and Telegram API access. Fluxgram wires grammY updates into a flow engine and uses grammY's API transformer chain for outbound sends, throttling, and chat id sanitization.
+Fluxgram persists paths into registered flow trees. That is what makes resume durable: a waiting prompt stores a path, and the next update continues from that path.
 
-## Core Tradeoff
+The cost is that flow shape matters. If you insert, remove, or reorder steps while a conversation is active, old paths can point somewhere else. For production bots, use explicit flow versions and choose a version mismatch policy before deploying shape changes.
 
-Fluxgram persists paths into registered flow trees. That makes resume durable, but it also means flow shape matters across deploys. When you change a running flow, use flow versions and version mismatch behavior deliberately.
+## Recommended Adoption Path
+
+1. Start with one multi-step command that currently has hidden session state.
+2. Keep `MemoryStorage` while developing and testing the flow shape.
+3. Add tests with the harness before moving the flow into production.
+4. Switch to durable storage when prompts or timers must survive restarts.
+5. Add operations only after the flow is useful: `cancelCommand`, active-flow inspection, debug sinks, and event-driven jobs.
+
+Fluxgram is best when you want conversation logic to read like the product journey while the runtime owns resume, queueing, and recovery.

@@ -35,7 +35,14 @@ const profile = fx.flow("profile", [
 
 ## Continuations
 
-Continuations are useful for menu loops and back buttons.
+Continuations are named return points inside the current flow. They are useful for menu loops, back buttons, and short detours where the user should return to an earlier choice without starting a new flow.
+
+You usually need only two ideas:
+
+- `storeCC("name")` saves "continue from the next step" under a key.
+- `redirectCC("name")` jumps back to that saved point later.
+
+## Menu Loop With storeCC And redirectCC
 
 ```ts
 const MENU_CC = "menu";
@@ -52,4 +59,42 @@ fx.flow("menu", [
 ]);
 ```
 
-`storeCC` saves the point after itself. `redirectCC` jumps back to that point. `callCC` lets you run a body while keeping a named continuation available.
+Read the flow like this:
+
+1. `storeCC(MENU_CC)` saves the point right after itself.
+2. The menu prompt is shown.
+3. If the user clicks "Settings", Fluxgram sends `"Settings"`.
+4. `redirectCC(MENU_CC)` jumps back to the saved point, so the menu prompt is shown again.
+5. If the user clicks "Exit", the flow sends `"Closed."` and continues normally.
+
+`reuseMessage: true` is a good fit for this pattern because repeated menu renders edit the existing bot message instead of stacking new menu messages.
+
+## Temporary Return Points With callCC
+
+`callCC(key, body)` saves a continuation, runs `body`, then continues after the `callCC` step unless `body` redirects first.
+
+Use it when a nested block needs an escape hatch back to the caller.
+
+```ts
+fx.flow("review", [
+  send("Before review."),
+  callCC("after-review", [
+    send("Inside review."),
+    prompt.buttons("Skip the rest?", {
+      buttons: [btn("Skip", redirectCC("after-review")), btn("Continue", send("Continuing."))],
+    }),
+    send("This runs only if the user did not skip."),
+  ]),
+  send("After review."),
+]);
+```
+
+In that example, clicking "Skip" jumps to the point after `callCC("after-review", ...)`, so the flow sends `"After review."`. Clicking "Continue" lets the body finish first.
+
+## When To Use Continuations
+
+Use continuations when the flow is still one conversation but needs to jump back to a known point. Menus and "back to main menu" buttons are the clearest case.
+
+Do not use continuations to hide large application state machines. If the conversation has several independent phases, a subflow with `callFlow` and `ret` is usually easier to understand and test.
+
+If `redirectCC` runs before a key has been saved with `storeCC` or `callCC`, Fluxgram treats it as a flow error. Keep continuation keys close to the menu or block that owns them, and prefer constants for shared keys.
