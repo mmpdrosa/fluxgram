@@ -18,10 +18,10 @@ jobs:
         with:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile
-      - name: Gate
-        run: bun run check && bun --filter fluxgram test
       - name: Build
         run: bun run build
+      - name: Gate
+        run: bun run check && bun --filter fluxgram test
       - name: Authenticate to npm
         run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
         env:
